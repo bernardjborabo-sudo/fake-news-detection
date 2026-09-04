@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fake News Detection System</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+
+<header class="topbar">
+    <div class="brand">
+        <div class="brand-mark">FN</div>
+
+        <div>
+            <h1>Fake News Detection</h1>
+            <p>Rule-based credibility checker</p>
+        </div>
+    </div>
+
+    <button id="clearAllBtn" class="ghost-btn">
+        Clear History
+    </button>
+</header>
+
+
+<main class="container">
+
+    <!-- HERO -->
+    <section class="hero">
+
+        <div>
+            <span class="eyebrow">
+                OOP & DSA PROJECT
+            </span>
+
+            <h2>
+                Check a news article before you share it.
+            </h2>
+
+            <p>
+                This tool gives a fast first-pass judgment using
+                source reputation, keyword patterns,
+                capitalization, punctuation, and headline/body similarity.
+                It is not an AI fact-checker.
+            </p>
+        </div>
+
+        <div class="hero-badge">
+            <strong>Rule-Based</strong>
+            <span>Fast analysis</span>
+        </div>
+
+    </section>
+
+
+    <!-- INPUT + RESULT -->
+    <section class="grid">
+
+        <!-- INPUT -->
+        <div class="card input-card">
+
+            <div class="card-head">
+
+                <div>
+                    <h3>Article Input</h3>
+                    <p>
+                        Enter the information you want to evaluate.
+                    </p>
+                </div>
+
+                <button id="sampleBtn" class="secondary-btn">
+                    Load Sample
+                </button>
+
+            </div>
+
+
+            <form id="newsForm">
+
+                <label for="headline">
+                    Headline
+                </label>
+
+                <input
+                    id="headline"
+                    type="text"
+                    maxlength="220"
+                    placeholder="Enter the news headline"
+                    required
+                >
+
+
+                <label for="source">
+                    Source Name
+                </label>
+
+                <input
+                    id="source"
+                    type="text"
+                    maxlength="120"
+                    placeholder="e.g. Reuters"
+                    required
+                >
+
+
+                <label for="date">
+                    Date
+                </label>
+
+                <input
+                    id="date"
+                    type="date"
+                >
+
+
+                <label for="body">
+                    Article Text
+                </label>
+
+                <textarea
+                    id="body"
+                    rows="10"
+                    placeholder="Paste or type the article text here..."
+                    required
+                ></textarea>
+
+
+                <div class="form-actions">
+
+                    <button
+                        class="primary-btn"
+                        type="submit"
+                    >
+                        Analyze Credibility
+                    </button>
+
+                    <button
+                        class="secondary-btn"
+                        type="button"
+                        id="resetBtn"
+                    >
+                        Reset
+                    </button>
+
+                </div>
+
+            </form>
+
+        </div>
+
+
+        <!-- RESULT -->
+        <div class="card result-card">
+
+            <div class="card-head">
+
+                <div>
+                    <h3>Credibility Report</h3>
+                    <p>Your analysis will appear here.</p>
+                </div>
+
+                <span
+                    id="verdictPill"
+                    class="pill neutral"
+                >
+                    Not analyzed
+                </span>
+
+            </div>
+
+
+            <div class="score-wrap">
+
+                <div
+                    class="score-ring"
+                    id="scoreRing"
+                >
+
+                    <div>
+                        <strong id="scoreValue">
+                            --
+                        </strong>
+
+                        <span>
+                            credibility
+                        </span>
+                    </div>
+
+                </div>
+
+
+                <div class="verdict-copy">
+
+                    <h4 id="verdictTitle">
+                        Ready to analyze
+                    </h4>
+
+                    <p id="verdictText">
+                        Enter a headline, source, and article text,
+                        then click Analyze Credibility.
+                    </p>
+
+                </div>
+
+            </div>
+
+
+            <div
+                class="analyzer-results"
+                id="analyzerResults"
+            >
+
+                <div class="empty-state">
+                    No analyzer results yet.
+                </div>
+
+            </div>
+
+        </div>
+
+    </section>
+
+
+    <!-- HISTORY -->
+    <section class="card">
+
+        <div class="card-head">
+
+            <div>
+                <h3>Most Suspicious Summary</h3>
+
+                <p>
+                    History sorted by suspicion score.
+                </p>
+            </div>
+
+            <span
+                id="historyCount"
+                class="count-badge"
+            >
+                0 checks
+            </span>
+
+        </div>
+
+
+        <div
+            id="historyList"
+            class="history-list"
+        >
+
+            <div class="empty-state">
+                No previous checks.
+            </div>
+
+        </div>
+
+    </section>
+
+
+    <!-- INFORMATION -->
+    <section class="info-grid">
+
+        <div class="info-box">
+
+            <h4>
+                How it works
+            </h4>
+
+            <p>
+                User Input → Article object →
+                SourceAnalyzer + KeywordAnalyzer +
+                SimilarityAnalyzer →
+                CredibilityReport →
+                NewsDatabase.
+            </p>
+
+        </div>
+
+
+        <div class="info-box">
+
+            <h4>
+                Project Note
+            </h4>
+
+            <p>
+                This implementation uses rule-based heuristics
+                rather than machine-learning models.
+                A result is only a first-pass assessment.
+            </p>
+
+        </div>
+
+    </section>
+
+</main>
+
+
+<footer>
+    Fake News Detection System • OOP & DSA
+</footer>
+
+
+<script src="script.js"></script>
+
+</body>
+</html>
