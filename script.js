@@ -13,6 +13,14 @@
 */
 
 
+const SUPABASE_URL = "https://phcnrnprkndjhztrvauh.supabase.co/rest/v1/";
+const SUPABASE_ANON_KEY = "sb_publishable_deV_4p8S9sIjtb5tuHy82w_ENfY2y-t";
+
+const supabaseClient =
+    window.supabase.creatClient(
+        SUPABASE_URL,
+        SUPABASE_ANON_KEY
+    );
 // ==========================================
 // ARTICLE CLASS
 // ==========================================
