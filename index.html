@@ -9,6 +9,48 @@
 
 <body>
 
+<!-- AUTH SCREEN -->
+<div id="authScreen" class="auth-screen">
+
+    <div class="auth-card">
+
+        <div class="brand">
+            <div class="brand-mark">FN</div>
+
+            <div>
+                <h1>Fake News Detection</h1>
+                <p>Rule-based credibility checker</p>
+            </div>
+        </div>
+
+        <div class="auth-tabs">
+            <button type="button" class="auth-tab active" data-mode="login">Log In</button>
+            <button type="button" class="auth-tab" data-mode="signup">Sign Up</button>
+        </div>
+
+        <form id="authForm">
+
+            <label for="authEmail">Email</label>
+            <input id="authEmail" type="email" required placeholder="you@example.com">
+
+            <label for="authPassword">Password</label>
+            <input id="authPassword" type="password" required minlength="6" placeholder="At least 6 characters">
+
+            <p id="authError" class="auth-error" hidden></p>
+            <p id="authNotice" class="auth-notice" hidden></p>
+
+            <button type="submit" class="primary-btn" id="authSubmitBtn">Log In</button>
+
+        </form>
+
+    </div>
+
+</div>
+
+
+<!-- APP SHELL (hidden until logged in) -->
+<div id="appShell" hidden>
+
 <header class="topbar">
     <div class="brand">
         <div class="brand-mark">FN</div>
@@ -19,9 +61,11 @@
         </div>
     </div>
 
-    <button id="clearAllBtn" class="ghost-btn">
-        Clear History
-    </button>
+    <div class="header-actions">
+        <span id="userEmail" class="user-email"></span>
+        <button id="signOutBtn" class="ghost-btn">Sign Out</button>
+        <button id="clearAllBtn" class="ghost-btn">Clear History</button>
+    </div>
 </header>
 
 
@@ -303,7 +347,11 @@
     Fake News Detection System • OOP & DSA
 </footer>
 
+</div>
+<!-- END APP SHELL -->
 
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="script.js"></script>
 
 </body>
