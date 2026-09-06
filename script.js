@@ -13,11 +13,11 @@
 */
 
 
-const SUPABASE_URL = "https://phcnrnprkndjhztrvauh.supabase.co/rest/v1/";
+const SUPABASE_URL = "https://phcnrnprkndjhztrvauh.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_deV_4p8S9sIjtb5tuHy82w_ENfY2y-t";
 
 const supabaseClient =
-    window.supabase.creatClient(
+    window.supabase.createClient(
         SUPABASE_URL,
         SUPABASE_ANON_KEY
     );
@@ -586,63 +586,110 @@ class CredibilityReport {
 
 class NewsDatabase {
 
-    constructor() {
+    constructor(userId) {
 
-        this.history =
-            JSON.parse(
-                localStorage.getItem(
-                    "fakeNewsHistory"
-                ) || "[]"
-            );
+        // Each signed-in user only ever sees rows
+        // where history.user_id matches their own id
+        // (enforced server-side by Row Level Security)
+
+        this.userId = userId;
+
+        this.history = [];
     }
 
 
-    save(
+    async load() {
+
+        const { data, error } =
+            await supabaseClient
+                .from("history")
+                .select("*")
+                .eq("user_id", this.userId)
+                .order("created_at", { ascending: false });
+
+
+        if (error) {
+
+            console.error(
+                "Failed to load history:",
+                error.message
+            );
+
+            this.history = [];
+
+            return;
+        }
+
+
+        this.history = data;
+    }
+
+
+    async save(
         article,
         report
     ) {
 
-        const record = {
+        const { data, error } =
+            await supabaseClient
+                .from("history")
+                .insert({
 
-            id:
-                Date.now(),
+                    user_id:
+                        this.userId,
 
-            article:
-                article,
+                    article:
+                        article,
 
-            credibility:
-                report.credibility,
+                    credibility:
+                        report.credibility,
 
-            suspicion:
-                report.suspicion,
+                    suspicion:
+                        report.suspicion,
 
-            verdict:
-                report.verdict
-        };
+                    verdict:
+                        report.verdict
+                })
+                .select()
+                .single();
 
 
-        this.history.push(record);
+        if (error) {
+
+            console.error(
+                "Failed to save history:",
+                error.message
+            );
+
+            return;
+        }
 
 
-        localStorage.setItem(
-
-            "fakeNewsHistory",
-
-            JSON.stringify(
-                this.history
-            )
-        );
+        this.history.unshift(data);
     }
 
 
-    clear() {
+    async clear() {
+
+        const { error } =
+            await supabaseClient
+                .from("history")
+                .delete()
+                .eq("user_id", this.userId);
+
+
+        if (error) {
+
+            console.error(
+                "Failed to clear history:",
+                error.message
+            );
+
+            return;
+        }
+
 
         this.history = [];
-
-
-        localStorage.removeItem(
-            "fakeNewsHistory"
-        );
     }
 
 
@@ -738,8 +785,9 @@ const knownSources = {
 // CREATE OBJECTS
 // ==========================================
 
-const database =
-    new NewsDatabase();
+// Created once a user is signed in (see AUTH section near the bottom)
+
+let database = null;
 
 
 const analyzers = [
@@ -937,7 +985,9 @@ function renderReport(
 function renderHistory() {
 
     const history =
-        database.getMostSuspicious();
+        database
+            ? database.getMostSuspicious()
+            : [];
 
 
     $("historyCount").textContent =
@@ -1018,9 +1068,15 @@ function renderHistory() {
 $("newsForm")
     .addEventListener(
         "submit",
-        event => {
+        async event => {
 
             event.preventDefault();
+
+
+            if (!database) {
+
+                return;
+            }
 
 
             const article =
@@ -1065,7 +1121,7 @@ $("newsForm")
 
             // Save
 
-            database.save(
+            await database.save(
                 article,
                 report
             );
@@ -1138,9 +1194,10 @@ $("resetBtn")
 $("clearAllBtn")
     .addEventListener(
         "click",
-        () => {
+        async () => {
 
             if (
+                !database ||
                 !database.history.length
             ) {
 
@@ -1154,7 +1211,7 @@ $("clearAllBtn")
                 )
             ) {
 
-                database.clear();
+                await database.clear();
 
                 renderHistory();
             }
@@ -1197,7 +1254,225 @@ $("sampleBtn")
 
 
 // ==========================================
-// LOAD HISTORY
+// AUTH: MODE SWITCHING (Log In / Sign Up)
 // ==========================================
 
-renderHistory();
+let authMode = "login";
+
+
+function setAuthMode(mode) {
+
+    authMode = mode;
+
+
+    document
+        .querySelectorAll(".auth-tab")
+        .forEach(tab =>
+            tab.classList.toggle(
+                "active",
+                tab.dataset.mode === mode
+            )
+        );
+
+
+    $("authSubmitBtn").textContent =
+        mode === "login"
+            ? "Log In"
+            : "Create Account";
+
+
+    $("authError").hidden = true;
+    $("authNotice").hidden = true;
+}
+
+
+document
+    .querySelectorAll(".auth-tab")
+    .forEach(tab => {
+
+        tab.addEventListener(
+            "click",
+            () =>
+                setAuthMode(tab.dataset.mode)
+        );
+    });
+
+
+
+// ==========================================
+// AUTH: FRIENDLY ERROR MESSAGES
+// ==========================================
+
+function authErrorMessage(error) {
+
+    const raw =
+        error?.message || "";
+
+
+    if (raw.includes("Invalid login credentials")) {
+
+        return "Incorrect email or password.";
+    }
+
+    if (raw.includes("User already registered")) {
+
+        return "An account with that email already exists. Try logging in instead.";
+    }
+
+    if (raw.includes("Password should be at least")) {
+
+        return "Password must be at least 6 characters.";
+    }
+
+    if (raw.includes("Unable to validate email address")) {
+
+        return "That email address doesn't look valid.";
+    }
+
+
+    return raw || "Something went wrong. Please try again.";
+}
+
+
+
+// ==========================================
+// AUTH: FORM SUBMIT (LOGIN OR SIGN UP)
+// ==========================================
+
+$("authForm")
+    .addEventListener(
+        "submit",
+        async event => {
+
+            event.preventDefault();
+
+            $("authError").hidden = true;
+            $("authNotice").hidden = true;
+
+
+            const email =
+                $("authEmail").value.trim();
+
+            const password =
+                $("authPassword").value;
+
+
+            if (authMode === "login") {
+
+                const { error } =
+                    await supabaseClient.auth
+                        .signInWithPassword({
+                            email,
+                            password
+                        });
+
+
+                if (error) {
+
+                    $("authError").hidden = false;
+
+                    $("authError").textContent =
+                        authErrorMessage(error);
+                }
+
+                // On success, onAuthStateChange (below)
+                // takes care of showing the app.
+
+            } else {
+
+                const { data, error } =
+                    await supabaseClient.auth
+                        .signUp({
+                            email,
+                            password
+                        });
+
+
+                if (error) {
+
+                    $("authError").hidden = false;
+
+                    $("authError").textContent =
+                        authErrorMessage(error);
+
+                    return;
+                }
+
+
+                if (!data.session) {
+
+                    // Email confirmation is required by
+                    // this Supabase project's auth settings
+
+                    $("authNotice").hidden = false;
+
+                    $("authNotice").textContent =
+                        "Account created! Check your email to confirm it, then log in.";
+
+                    setAuthMode("login");
+                }
+
+                // If data.session exists, email confirmation
+                // is off and onAuthStateChange logs them in
+                // automatically.
+            }
+        }
+    );
+
+
+
+// ==========================================
+// AUTH: SIGN OUT
+// ==========================================
+
+$("signOutBtn")
+    .addEventListener(
+        "click",
+        () => {
+
+            supabaseClient.auth.signOut();
+        }
+    );
+
+
+
+// ==========================================
+// AUTH: STATE CHANGE (GATES THE WHOLE APP)
+// ==========================================
+
+supabaseClient.auth.onAuthStateChange(
+    async (event, session) => {
+
+        if (session?.user) {
+
+            // Signed in: show the app, load their history
+
+            $("authScreen").hidden = true;
+            $("appShell").hidden = false;
+
+            $("userEmail").textContent =
+                session.user.email;
+
+
+            database =
+                new NewsDatabase(session.user.id);
+
+            await database.load();
+
+            renderHistory();
+
+        } else {
+
+            // Signed out: show the auth gate, hide the app
+
+            database = null;
+
+            $("appShell").hidden = true;
+            $("authScreen").hidden = false;
+
+            $("authForm").reset();
+
+            setAuthMode("login");
+        }
+    }
+);
