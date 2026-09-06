@@ -1357,64 +1357,98 @@ $("authForm")
                 $("authPassword").value;
 
 
-            if (authMode === "login") {
+            const submitBtn =
+                $("authSubmitBtn");
 
-                const { error } =
-                    await supabaseClient.auth
-                        .signInWithPassword({
-                            email,
-                            password
-                        });
+            const originalLabel =
+                submitBtn.textContent;
+
+            submitBtn.disabled = true;
+            submitBtn.textContent = "Working...";
 
 
-                if (error) {
+            try {
 
-                    $("authError").hidden = false;
+                if (authMode === "login") {
 
-                    $("authError").textContent =
-                        authErrorMessage(error);
+                    const { error } =
+                        await supabaseClient.auth
+                            .signInWithPassword({
+                                email,
+                                password
+                            });
+
+
+                    if (error) {
+
+                        $("authError").hidden = false;
+
+                        $("authError").textContent =
+                            authErrorMessage(error);
+                    }
+
+                    // On success, onAuthStateChange (below)
+                    // takes care of showing the app.
+
+                } else {
+
+                    const { data, error } =
+                        await supabaseClient.auth
+                            .signUp({
+                                email,
+                                password
+                            });
+
+
+                    if (error) {
+
+                        $("authError").hidden = false;
+
+                        $("authError").textContent =
+                            authErrorMessage(error);
+
+                        return;
+                    }
+
+
+                    if (!data.session) {
+
+                        // Email confirmation is required by
+                        // this Supabase project's auth settings
+
+                        $("authNotice").hidden = false;
+
+                        $("authNotice").textContent =
+                            "Account created! Check your email to confirm it, then log in.";
+
+                        setAuthMode("login");
+                    }
+
+                    // If data.session exists, email confirmation
+                    // is off and onAuthStateChange logs them in
+                    // automatically.
                 }
 
-                // On success, onAuthStateChange (below)
-                // takes care of showing the app.
+            } catch (err) {
 
-            } else {
+                // A network-level failure (e.g. Supabase project
+                // unreachable/paused, CORS, DNS) lands here instead
+                // of in { error } above — surface it instead of
+                // failing silently.
 
-                const { data, error } =
-                    await supabaseClient.auth
-                        .signUp({
-                            email,
-                            password
-                        });
+                console.error("Auth request failed:", err);
 
+                $("authError").hidden = false;
 
-                if (error) {
+                $("authError").textContent =
+                    "Couldn't reach the server: " +
+                    (err?.message || "unknown error") +
+                    ". Check the console for details.";
 
-                    $("authError").hidden = false;
+            } finally {
 
-                    $("authError").textContent =
-                        authErrorMessage(error);
-
-                    return;
-                }
-
-
-                if (!data.session) {
-
-                    // Email confirmation is required by
-                    // this Supabase project's auth settings
-
-                    $("authNotice").hidden = false;
-
-                    $("authNotice").textContent =
-                        "Account created! Check your email to confirm it, then log in.";
-
-                    setAuthMode("login");
-                }
-
-                // If data.session exists, email confirmation
-                // is off and onAuthStateChange logs them in
-                // automatically.
+                submitBtn.disabled = false;
+                submitBtn.textContent = originalLabel;
             }
         }
     );
