@@ -31,7 +31,7 @@ body {
 }
 
 
-/* HEADER */
+
 
 .topbar {
     height: 76px;
@@ -92,7 +92,7 @@ body {
 }
 
 
-/* MAIN */
+
 
 .container {
     width: min(1180px, 92%);
@@ -101,7 +101,6 @@ body {
 }
 
 
-/* HERO */
 
 .hero {
     display: flex;
@@ -204,7 +203,6 @@ body {
 }
 
 
-/* CARDS */
 
 .card {
     background: var(--card);
@@ -250,7 +248,6 @@ body {
 }
 
 
-/* FORM */
 
 label {
     display: block;
@@ -302,7 +299,6 @@ textarea {
 }
 
 
-/* BUTTONS */
 
 button {
     border: 0;
@@ -363,8 +359,6 @@ button {
 }
 
 
-/* VERDICT */
-
 .pill,
 .count-badge {
     display: inline-flex;
@@ -418,7 +412,6 @@ button {
 }
 
 
-/* SCORE */
 
 .score-wrap {
     display: flex;
@@ -511,7 +504,6 @@ button {
 }
 
 
-/* ANALYZERS */
 
 .analyzer-results {
     display: grid;
@@ -581,7 +573,6 @@ button {
 }
 
 
-/* HISTORY */
 
 .history-list {
     display: grid;
@@ -648,7 +639,6 @@ button {
 }
 
 
-/* INFORMATION */
 
 .info-grid {
     display: grid;
@@ -686,7 +676,6 @@ button {
 }
 
 
-/* FOOTER */
 
 footer {
     text-align: center;
@@ -699,7 +688,6 @@ footer {
 }
 
 
-/* AUTH SCREEN */
 
 .auth-screen[hidden] {
     display: none;
@@ -810,7 +798,6 @@ footer {
 }
 
 
-/* HEADER USER BOX */
 
 .header-actions {
     display: flex;
@@ -830,7 +817,6 @@ footer {
 }
 
 
-/* RESPONSIVE */
 
 @media (max-width: 850px) {
 
