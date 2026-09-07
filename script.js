@@ -21,9 +21,6 @@ const supabaseClient =
         SUPABASE_URL,
         SUPABASE_ANON_KEY
     );
-// ==========================================
-// ARTICLE CLASS
-// ==========================================
 
 class Article {
 
@@ -48,10 +45,6 @@ class Article {
 
 
 
-// ==========================================
-// SOURCE CLASS
-// ==========================================
-
 class Source {
 
     constructor(
@@ -70,10 +63,6 @@ class Source {
 
 
 
-// ==========================================
-// ABSTRACT ANALYZER CLASS
-// ==========================================
-
 class Analyzer {
 
     analyze(article) {
@@ -85,10 +74,6 @@ class Analyzer {
 }
 
 
-
-// ==========================================
-// KEYWORD ANALYZER
-// ==========================================
 
 class KeywordAnalyzer
     extends Analyzer {
@@ -146,16 +131,11 @@ class KeywordAnalyzer
             text.toLowerCase();
 
 
-        // Find suspicious keywords
-
         const hits =
             [...this.keywords]
                 .filter(keyword =>
                     lower.includes(keyword)
                 );
-
-
-        // Check capitalization
 
         const letters =
             text.replace(
@@ -189,15 +169,12 @@ class KeywordAnalyzer
         let suspicion = 0;
 
 
-        // Keyword score
 
         suspicion += Math.min(
             45,
             hits.length * 9
         );
 
-
-        // Capitalization score
 
         if (capsRatio > 0.35) {
 
@@ -208,8 +185,6 @@ class KeywordAnalyzer
             suspicion += 12;
         }
 
-
-        // Punctuation score
 
         suspicion += Math.min(
             30,
@@ -283,11 +258,6 @@ class KeywordAnalyzer
     }
 }
 
-
-
-// ==========================================
-// SOURCE ANALYZER
-// ==========================================
 
 class SourceAnalyzer
     extends Analyzer {
@@ -385,10 +355,6 @@ class SourceAnalyzer
 }
 
 
-
-// ==========================================
-// SIMILARITY ANALYZER
-// ==========================================
 
 class SimilarityAnalyzer
     extends Analyzer {
@@ -507,10 +473,6 @@ class SimilarityAnalyzer
 
 
 
-// ==========================================
-// CREDIBILITY REPORT
-// ==========================================
-
 class CredibilityReport {
 
     constructor(results) {
@@ -580,17 +542,11 @@ class CredibilityReport {
 
 
 
-// ==========================================
-// NEWS DATABASE
-// ==========================================
 
 class NewsDatabase {
 
     constructor(userId) {
 
-        // Each signed-in user only ever sees rows
-        // where history.user_id matches their own id
-        // (enforced server-side by Row Level Security)
 
         this.userId = userId;
 
@@ -709,11 +665,6 @@ class NewsDatabase {
 }
 
 
-
-// ==========================================
-// KNOWN SOURCES
-// ==========================================
-
 const knownSources = {
 
     "reuters":
@@ -781,11 +732,6 @@ const knownSources = {
 
 
 
-// ==========================================
-// CREATE OBJECTS
-// ==========================================
-
-// Created once a user is signed in (see AUTH section near the bottom)
 
 let database = null;
 
@@ -801,11 +747,6 @@ const analyzers = [
     new SimilarityAnalyzer()
 ];
 
-
-
-// ==========================================
-// HELPER FUNCTIONS
-// ==========================================
 
 const $ =
     id =>
@@ -862,10 +803,6 @@ function verdictClass(
 
 
 
-// ==========================================
-// DISPLAY REPORT
-// ==========================================
-
 function renderReport(
     report
 ) {
@@ -899,8 +836,6 @@ function renderReport(
         `${report.credibility}%`;
 
 
-    // Verdict title
-
     $("verdictTitle").textContent =
         report.verdict;
 
@@ -929,8 +864,6 @@ function renderReport(
             "The article shows several suspicious patterns. Do not treat this result as proof; verify the claims independently.";
     }
 
-
-    // Analyzer results
 
     $("analyzerResults").innerHTML =
 
@@ -976,11 +909,6 @@ function renderReport(
         ).join("");
 }
 
-
-
-// ==========================================
-// DISPLAY HISTORY
-// ==========================================
 
 function renderHistory() {
 
@@ -1060,11 +988,6 @@ function renderHistory() {
 }
 
 
-
-// ==========================================
-// ANALYZE FORM
-// ==========================================
-
 $("newsForm")
     .addEventListener(
         "submit",
@@ -1092,8 +1015,6 @@ $("newsForm")
                 );
 
 
-            // Run all analyzers
-
             const results =
                 analyzers.map(
 
@@ -1104,22 +1025,17 @@ $("newsForm")
                 );
 
 
-            // Create report
-
             const report =
                 new CredibilityReport(
                     results
                 );
 
 
-            // Display
-
             renderReport(
                 report
             );
 
 
-            // Save
 
             await database.save(
                 article,
@@ -1127,17 +1043,12 @@ $("newsForm")
             );
 
 
-            // Refresh history
 
             renderHistory();
         }
     );
 
 
-
-// ==========================================
-// RESET
-// ==========================================
 
 $("resetBtn")
     .addEventListener(
@@ -1187,10 +1098,6 @@ $("resetBtn")
 
 
 
-// ==========================================
-// CLEAR HISTORY
-// ==========================================
-
 $("clearAllBtn")
     .addEventListener(
         "click",
@@ -1219,10 +1126,6 @@ $("clearAllBtn")
     );
 
 
-
-// ==========================================
-// SAMPLE ARTICLE
-// ==========================================
 
 $("sampleBtn")
     .addEventListener(
@@ -1253,9 +1156,6 @@ $("sampleBtn")
 
 
 
-// ==========================================
-// AUTH: MODE SWITCHING (Log In / Sign Up)
-// ==========================================
 
 let authMode = "login";
 
@@ -1299,9 +1199,6 @@ document
 
 
 
-// ==========================================
-// AUTH: FRIENDLY ERROR MESSAGES
-// ==========================================
 
 function authErrorMessage(error) {
 
@@ -1334,10 +1231,6 @@ function authErrorMessage(error) {
 }
 
 
-
-// ==========================================
-// AUTH: FORM SUBMIT (LOGIN OR SIGN UP)
-// ==========================================
 
 $("authForm")
     .addEventListener(
@@ -1387,9 +1280,7 @@ $("authForm")
                             authErrorMessage(error);
                     }
 
-                    // On success, onAuthStateChange (below)
-                    // takes care of showing the app.
-
+ 
                 } else {
 
                     const { data, error } =
@@ -1413,8 +1304,6 @@ $("authForm")
 
                     if (!data.session) {
 
-                        // Email confirmation is required by
-                        // this Supabase project's auth settings
 
                         $("authNotice").hidden = false;
 
@@ -1424,17 +1313,10 @@ $("authForm")
                         setAuthMode("login");
                     }
 
-                    // If data.session exists, email confirmation
-                    // is off and onAuthStateChange logs them in
-                    // automatically.
                 }
 
             } catch (err) {
 
-                // A network-level failure (e.g. Supabase project
-                // unreachable/paused, CORS, DNS) lands here instead
-                // of in { error } above — surface it instead of
-                // failing silently.
 
                 console.error("Auth request failed:", err);
 
@@ -1455,9 +1337,6 @@ $("authForm")
 
 
 
-// ==========================================
-// AUTH: SIGN OUT
-// ==========================================
 
 $("signOutBtn")
     .addEventListener(
@@ -1469,9 +1348,6 @@ $("signOutBtn")
     );
 
 
-
-// ==========================================
-// AUTH: STATE CHANGE (GATES THE WHOLE APP)
 // ==========================================
 
 supabaseClient.auth.onAuthStateChange(
@@ -1479,7 +1355,6 @@ supabaseClient.auth.onAuthStateChange(
 
         if (session?.user) {
 
-            // Signed in: show the app, load their history
 
             $("authScreen").hidden = true;
             $("appShell").hidden = false;
@@ -1497,7 +1372,6 @@ supabaseClient.auth.onAuthStateChange(
 
         } else {
 
-            // Signed out: show the auth gate, hide the app
 
             database = null;
 
