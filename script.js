@@ -21,6 +21,9 @@ const supabaseClient =
         SUPABASE_URL,
         SUPABASE_ANON_KEY
     );
+// ==========================================
+// ARTICLE CLASS
+// ==========================================
 
 class Article {
 
@@ -45,6 +48,10 @@ class Article {
 
 
 
+// ==========================================
+// SOURCE CLASS
+// ==========================================
+
 class Source {
 
     constructor(
@@ -63,6 +70,10 @@ class Source {
 
 
 
+// ==========================================
+// ABSTRACT ANALYZER CLASS
+// ==========================================
+
 class Analyzer {
 
     analyze(article) {
@@ -75,6 +86,10 @@ class Analyzer {
 
 
 
+// ==========================================
+// KEYWORD ANALYZER
+// ==========================================
+
 class KeywordAnalyzer
     extends Analyzer {
 
@@ -82,41 +97,51 @@ class KeywordAnalyzer
 
         super();
 
-        // Hash Set equivalent
+        // Hash Map equivalent: phrase -> severity weight.
+        // Higher weight = stronger clickbait/sensationalism signal.
+        // Splitting into tiers avoids treating "breaking" (common,
+        // legitimate in real news) the same as "truth they don't
+        // want you to know" (almost always bait).
 
-        this.keywords = new Set([
+        this.keywords = new Map([
 
-            "shocking",
+            // Tier 1: mild / commonly used even by real outlets
+            ["breaking", 3],
+            ["urgent", 4],
+            ["exclusive", 3],
+            ["viral", 4],
+            ["scandal", 4],
 
-            "breaking",
+            // Tier 2: moderate sensationalism
+            ["shocking", 6],
+            ["unbelievable", 6],
+            ["secret", 5],
+            ["exposed", 6],
+            ["destroyed", 6],
+            ["slams", 5],
+            ["outrage", 5],
+            ["bombshell", 6],
+            ["insane", 5],
+            ["you need to know", 5],
+            ["gone wrong", 5],
+            ["what happened next", 6],
 
-            "you won't believe",
-
-            "unbelievable",
-
-            "secret",
-
-            "exposed",
-
-            "miracle",
-
-            "urgent",
-
-            "100% proof",
-
-            "must see",
-
-            "share now",
-
-            "viral",
-
-            "scandal",
-
-            "destroyed",
-
-            "guaranteed",
-
-            "truth they don't want you to know"
+            // Tier 3: strong clickbait / manipulation phrasing
+            ["you won't believe", 9],
+            ["miracle", 8],
+            ["100% proof", 10],
+            ["guaranteed", 7],
+            ["must see", 7],
+            ["share now", 9],
+            ["share this before", 10],
+            ["they don't want you to know", 10],
+            ["truth they don't want you to know", 10],
+            ["mainstream media won't tell you", 10],
+            ["doctors hate", 9],
+            ["cure they don't want", 10],
+            ["wake up", 6],
+            ["click here", 8],
+            ["won't believe what happens", 10]
 
         ]);
     }
@@ -131,65 +156,115 @@ class KeywordAnalyzer
             text.toLowerCase();
 
 
-        const hits =
-            [...this.keywords]
-                .filter(keyword =>
-                    lower.includes(keyword)
-                );
+        // Find suspicious keyword/phrase hits, weighted by severity.
+        // Use word-boundary-aware matching for single words so we
+        // don't match substrings inside unrelated words; multi-word
+        // phrases are matched as plain substrings since word
+        // boundaries on both ends already make false positives rare.
 
-        const letters =
-            text.replace(
-                /[^A-Za-z]/g,
-                ""
+        const hits = [];
+
+        for (const [phrase, weight] of this.keywords) {
+
+            const hasSpace = phrase.includes(" ");
+
+            const found = hasSpace
+                ? lower.includes(phrase)
+                : new RegExp(`\\b${phrase}\\b`, "i").test(lower);
+
+            if (found) {
+
+                hits.push({ phrase, weight });
+            }
+        }
+
+
+        const keywordScore =
+            hits.reduce(
+                (sum, hit) => sum + hit.weight,
+                0
             );
 
 
-        const upperLetters =
-            letters.replace(
-                /[^A-Z]/g,
-                ""
+        // Check capitalization — per WORD, not per letter.
+        // A raw letter-based ratio unfairly flags short, normal
+        // text containing a couple of acronyms (e.g. "US", "UN").
+        // Instead, count words that are entirely uppercase, at
+        // least 3 letters long (so "I", "A", "US", "UK" don't
+        // count), and exclude a short allow-list of common
+        // legitimate acronyms.
+
+        const commonAcronyms = new Set([
+            "usa", "uk", "un", "eu", "who", "nba", "nfl", "ceo",
+            "faq", "fbi", "cia", "gdp", "covid", "ai", "us"
+        ]);
+
+        const words =
+            text.match(/[A-Za-z']+/g) || [];
+
+        const shoutWords =
+            words.filter(word =>
+                word.length >= 3 &&
+                word === word.toUpperCase() &&
+                /[A-Z]/.test(word) &&
+                !commonAcronyms.has(word.toLowerCase())
             );
 
-
-        const capsRatio =
-            letters.length
-                ? upperLetters.length /
-                  letters.length
+        const shoutRatio =
+            words.length
+                ? shoutWords.length / words.length
                 : 0;
 
 
-        // Check punctuation
+        // Check punctuation: both "runs" (!!!, ??, ...) AND overall
+        // exclamation-mark density, since a single "!!!" and ten
+        // separate "!" convey similarly manipulative tone but the
+        // old check only caught the former.
 
-        const punctuationMatches =
+        const punctuationRuns =
             text.match(
                 /[!?]{2,}|\.{3,}/g
             ) || [];
+
+        const exclamationCount =
+            (text.match(/!/g) || []).length;
 
 
         let suspicion = 0;
 
 
+        // Keyword score (weighted, capped)
 
-        suspicion += Math.min(
-            45,
-            hits.length * 9
-        );
+        suspicion += Math.min(45, keywordScore);
 
 
-        if (capsRatio > 0.35) {
+        // Capitalization ("shouting") score
+
+        if (shoutRatio > 0.15) {
 
             suspicion += 25;
 
-        } else if (capsRatio > 0.20) {
+        } else if (shoutRatio > 0.07) {
 
             suspicion += 12;
         }
 
 
-        suspicion += Math.min(
-            30,
-            punctuationMatches.length * 6
-        );
+        // Punctuation score: runs + density, capped combined
+
+        let punctuationScore =
+            Math.min(20, punctuationRuns.length * 6);
+
+        if (exclamationCount >= 5) {
+
+            punctuationScore += 10;
+
+        } else if (exclamationCount >= 2) {
+
+            punctuationScore += 5;
+        }
+
+        suspicion += Math.min(30, punctuationScore);
 
 
         suspicion =
@@ -204,32 +279,44 @@ class KeywordAnalyzer
 
         if (hits.length) {
 
+            const names = hits
+                .sort((a, b) => b.weight - a.weight)
+                .slice(0, 4)
+                .map(hit => hit.phrase);
+
             reasons.push(
                 `Found ${hits.length} sensational/clickbait pattern(s): ` +
-                `${hits.slice(0, 4).join(", ")}` +
+                `${names.join(", ")}` +
                 `${hits.length > 4 ? "..." : ""}.`
             );
         }
 
 
-        if (capsRatio > 0.35) {
+        if (shoutRatio > 0.15) {
 
             reasons.push(
-                "Excessive capitalization detected."
+                "Excessive capitalized words detected."
             );
 
-        } else if (capsRatio > 0.20) {
+        } else if (shoutRatio > 0.07) {
 
             reasons.push(
-                "Higher-than-usual capitalization detected."
+                "Higher-than-usual number of capitalized words detected."
             );
         }
 
 
-        if (punctuationMatches.length) {
+        if (punctuationRuns.length) {
 
             reasons.push(
-                "Excessive punctuation detected."
+                "Excessive punctuation runs (e.g. \"!!!\") detected."
+            );
+        }
+
+        if (exclamationCount >= 2) {
+
+            reasons.push(
+                `${exclamationCount} exclamation marks found in the text.`
             );
         }
 
@@ -259,6 +346,11 @@ class KeywordAnalyzer
 }
 
 
+
+// ==========================================
+// SOURCE ANALYZER
+// ==========================================
+
 class SourceAnalyzer
     extends Analyzer {
 
@@ -277,8 +369,20 @@ class SourceAnalyzer
 
     analyze(article) {
 
-        const key =
-            article.sourceName.toLowerCase();
+        // Normalize: lowercase, strip a leading "www.", strip a
+        // trailing top-level domain, and trim punctuation, so that
+        // "Reuters", "reuters.com", and "www.reuters.com" all match
+        // the same table entry instead of only exact typed strings.
+
+        const normalize = (name) =>
+            name
+                .toLowerCase()
+                .trim()
+                .replace(/^www\./, "")
+                .replace(/\.(com|net|org|ph|co)$/, "")
+                .replace(/[^a-z0-9\s]/g, "");
+
+        const key = normalize(article.sourceName);
 
 
         const source =
@@ -291,24 +395,33 @@ class SourceAnalyzer
             );
 
 
-        let suspicion;
+        // Use the source's continuous "weight" (0-100 trust score)
+        // rather than only three flat buckets. This lets two
+        // "unverified" sources, or two "trusted" sources, still be
+        // told apart if their known reputational weight differs —
+        // a graduated score is more accurate than a step function.
+
+        let suspicion =
+            Math.round(100 - source.weight);
 
 
-        if (
-            source.rating === "trusted"
-        ) {
+        // Still respect the rating as a hard floor/ceiling so a
+        // blacklisted source can never look better than "very
+        // suspicious", and a trusted source never worse than
+        // "fairly credible", regardless of its numeric weight.
 
-            suspicion = 0;
+        if (source.rating === "blacklisted") {
 
-        } else if (
-            source.rating === "blacklisted"
-        ) {
+            suspicion = Math.max(suspicion, 80);
 
-            suspicion = 90;
+        } else if (source.rating === "trusted") {
+
+            suspicion = Math.min(suspicion, 20);
 
         } else {
 
-            suspicion = 45;
+            // unverified: keep within a moderate suspicion band
+            suspicion = Math.min(Math.max(suspicion, 35), 65);
         }
 
 
@@ -320,7 +433,7 @@ class SourceAnalyzer
         ) {
 
             reason =
-                `Source "${article.sourceName}" is on the trusted-source list.`;
+                `Source "${article.sourceName}" is on the trusted-source list (trust weight ${source.weight}/100).`;
 
         } else if (
             source.rating === "blacklisted"
@@ -356,8 +469,32 @@ class SourceAnalyzer
 
 
 
+// ==========================================
+// SIMILARITY ANALYZER
+// ==========================================
+
 class SimilarityAnalyzer
     extends Analyzer {
+
+    constructor() {
+
+        super();
+
+        // Common function words to ignore. Without this, matching
+        // words like "that", "with", or "have" inflate the overlap
+        // score without telling us anything about actual topical
+        // similarity between headline and body.
+
+        this.stopwords = new Set([
+            "this", "that", "with", "from", "have", "will",
+            "your", "about", "which", "their", "there", "would",
+            "could", "should", "these", "those", "into", "than",
+            "then", "them", "when", "what", "were", "been", "being",
+            "just", "also", "very", "over", "after", "before",
+            "such", "some", "here", "does", "doing", "each"
+        ]);
+    }
+
 
     analyze(article) {
 
@@ -378,7 +515,8 @@ class SimilarityAnalyzer
 
                         .filter(
                             word =>
-                                word.length > 3
+                                word.length > 3 &&
+                                !this.stopwords.has(word)
                         )
                 );
 
@@ -417,13 +555,10 @@ class SimilarityAnalyzer
 
         let overlap = 0;
 
-
         headlineWords.forEach(
             word => {
 
-                if (
-                    bodyWords.has(word)
-                ) {
+                if (bodyWords.has(word)) {
 
                     overlap++;
                 }
@@ -431,9 +566,37 @@ class SimilarityAnalyzer
         );
 
 
+        // "Recall": how much of the headline's claim is actually
+        // discussed in the body (the original metric).
+
+        const recall =
+            overlap / headlineWords.size;
+
+
+        // "Jaccard": overlap relative to the UNION of both word
+        // sets. This adds sensitivity the old metric lacked: a
+        // headline can score high on recall just by using a couple
+        // of generic words that also happen to appear in a long,
+        // unrelated body — Jaccard is harder to game that way
+        // because a large, mostly-unrelated body pulls the union
+        // up and the score down.
+
+        const union =
+            new Set([...headlineWords, ...bodyWords]).size;
+
+        const jaccard =
+            overlap / union;
+
+
+        // Blend both signals. Recall answers "is the headline's
+        // topic covered?"; Jaccard answers "how much of the overall
+        // vocabulary is actually shared?". Weighting recall higher
+        // keeps the metric close to its original intent while
+        // Jaccard corrects for headline words that are too generic
+        // to mean much on their own.
+
         const similarity =
-            overlap /
-            headlineWords.size;
+            (recall * 0.7) + (jaccard * 0.3);
 
 
         let suspicion =
@@ -452,6 +615,12 @@ class SimilarityAnalyzer
             );
 
 
+        const reason =
+            `Approximately ${Math.round(recall * 100)}% of meaningful ` +
+            `headline words also appear in the article body ` +
+            `(topical overlap score: ${Math.round(similarity * 100)}%).`;
+
+
         return {
 
             name:
@@ -464,14 +633,16 @@ class SimilarityAnalyzer
                 100 - suspicion,
 
             reason:
-                `Approximately ${Math.round(
-                    similarity * 100
-                )}% of meaningful headline words also appear in the article body.`
+                reason
         };
     }
 }
 
 
+
+// ==========================================
+// CREDIBILITY REPORT
+// ==========================================
 
 class CredibilityReport {
 
@@ -542,11 +713,17 @@ class CredibilityReport {
 
 
 
+// ==========================================
+// NEWS DATABASE
+// ==========================================
 
 class NewsDatabase {
 
     constructor(userId) {
 
+        // Each signed-in user only ever sees rows
+        // where history.user_id matches their own id
+        // (enforced server-side by Row Level Security)
 
         this.userId = userId;
 
@@ -665,73 +842,79 @@ class NewsDatabase {
 }
 
 
+
+// ==========================================
+// KNOWN SOURCES
+// ==========================================
+
 const knownSources = {
 
     "reuters":
-
-        new Source(
-            "Reuters",
-            "trusted",
-            95
-        ),
-
+        new Source("Reuters", "trusted", 95),
 
     "bbc":
-
-        new Source(
-            "BBC",
-            "trusted",
-            90
-        ),
-
+        new Source("BBC", "trusted", 92),
 
     "associated press":
-
-        new Source(
-            "Associated Press",
-            "trusted",
-            90
-        ),
-
+        new Source("Associated Press", "trusted", 93),
 
     "ap":
+        new Source("Associated Press", "trusted", 93),
 
-        new Source(
-            "Associated Press",
-            "trusted",
-            90
-        ),
+    "the new york times":
+        new Source("The New York Times", "trusted", 85),
 
+    "nytimes":
+        new Source("The New York Times", "trusted", 85),
+
+    "npr":
+        new Source("NPR", "trusted", 88),
+
+    "the guardian":
+        new Source("The Guardian", "trusted", 82),
 
     "philippine daily inquirer":
+        new Source("Philippine Daily Inquirer", "trusted", 85),
 
-        new Source(
-            "Philippine Daily Inquirer",
-            "trusted",
-            85
-        ),
-
+    "inquirer":
+        new Source("Philippine Daily Inquirer", "trusted", 85),
 
     "rappler":
+        new Source("Rappler", "trusted", 82),
 
-        new Source(
-            "Rappler",
-            "trusted",
-            80
-        ),
+    "gma news":
+        new Source("GMA News", "trusted", 80),
 
+    "abscbn news":
+        new Source("ABS-CBN News", "trusted", 80),
+
+    "philstar":
+        new Source("The Philippine Star", "trusted", 78),
+
+    "pna":
+        new Source("Philippine News Agency", "trusted", 80),
+
+    // Known low-quality / satire / clickbait-farm style outlets.
+    // Weight is low but not zero — "blacklisted" plus the floor in
+    // SourceAnalyzer already guarantees a high suspicion score.
 
     "example-blacklist.com":
+        new Source("example-blacklist.com", "blacklisted", 10),
 
-        new Source(
-            "example-blacklist.com",
-            "blacklisted",
-            10
-        )
+    "worldnewsdailyreport":
+        new Source("World News Daily Report", "blacklisted", 5),
+
+    "the onion":
+        new Source("The Onion", "blacklisted", 15) // satire, not "fake" per se, but not a news source
 };
 
 
 
+// ==========================================
+// CREATE OBJECTS
+// ==========================================
+
+// Created once a user is signed in (see AUTH section near the bottom)
 
 let database = null;
 
@@ -747,6 +930,11 @@ const analyzers = [
     new SimilarityAnalyzer()
 ];
 
+
+
+// ==========================================
+// HELPER FUNCTIONS
+// ==========================================
 
 const $ =
     id =>
@@ -803,6 +991,10 @@ function verdictClass(
 
 
 
+// ==========================================
+// DISPLAY REPORT
+// ==========================================
+
 function renderReport(
     report
 ) {
@@ -836,6 +1028,8 @@ function renderReport(
         `${report.credibility}%`;
 
 
+    // Verdict title
+
     $("verdictTitle").textContent =
         report.verdict;
 
@@ -864,6 +1058,8 @@ function renderReport(
             "The article shows several suspicious patterns. Do not treat this result as proof; verify the claims independently.";
     }
 
+
+    // Analyzer results
 
     $("analyzerResults").innerHTML =
 
@@ -909,6 +1105,11 @@ function renderReport(
         ).join("");
 }
 
+
+
+// ==========================================
+// DISPLAY HISTORY
+// ==========================================
 
 function renderHistory() {
 
@@ -988,6 +1189,11 @@ function renderHistory() {
 }
 
 
+
+// ==========================================
+// ANALYZE FORM
+// ==========================================
+
 $("newsForm")
     .addEventListener(
         "submit",
@@ -1015,6 +1221,8 @@ $("newsForm")
                 );
 
 
+            // Run all analyzers
+
             const results =
                 analyzers.map(
 
@@ -1025,17 +1233,22 @@ $("newsForm")
                 );
 
 
+            // Create report
+
             const report =
                 new CredibilityReport(
                     results
                 );
 
 
+            // Display
+
             renderReport(
                 report
             );
 
 
+            // Save
 
             await database.save(
                 article,
@@ -1043,12 +1256,17 @@ $("newsForm")
             );
 
 
+            // Refresh history
 
             renderHistory();
         }
     );
 
 
+
+// ==========================================
+// RESET
+// ==========================================
 
 $("resetBtn")
     .addEventListener(
@@ -1098,6 +1316,10 @@ $("resetBtn")
 
 
 
+// ==========================================
+// CLEAR HISTORY
+// ==========================================
+
 $("clearAllBtn")
     .addEventListener(
         "click",
@@ -1126,6 +1348,10 @@ $("clearAllBtn")
     );
 
 
+
+// ==========================================
+// SAMPLE ARTICLE
+// ==========================================
 
 $("sampleBtn")
     .addEventListener(
@@ -1156,6 +1382,9 @@ $("sampleBtn")
 
 
 
+// ==========================================
+// AUTH: MODE SWITCHING (Log In / Sign Up)
+// ==========================================
 
 let authMode = "login";
 
@@ -1199,6 +1428,9 @@ document
 
 
 
+// ==========================================
+// AUTH: FRIENDLY ERROR MESSAGES
+// ==========================================
 
 function authErrorMessage(error) {
 
@@ -1232,6 +1464,10 @@ function authErrorMessage(error) {
 
 
 
+// ==========================================
+// AUTH: FORM SUBMIT (LOGIN OR SIGN UP)
+// ==========================================
+
 $("authForm")
     .addEventListener(
         "submit",
@@ -1250,93 +1486,73 @@ $("authForm")
                 $("authPassword").value;
 
 
-            const submitBtn =
-                $("authSubmitBtn");
+            if (authMode === "login") {
 
-            const originalLabel =
-                submitBtn.textContent;
-
-            submitBtn.disabled = true;
-            submitBtn.textContent = "Working...";
-
-
-            try {
-
-                if (authMode === "login") {
-
-                    const { error } =
-                        await supabaseClient.auth
-                            .signInWithPassword({
-                                email,
-                                password
-                            });
+                const { error } =
+                    await supabaseClient.auth
+                        .signInWithPassword({
+                            email,
+                            password
+                        });
 
 
-                    if (error) {
+                if (error) {
 
-                        $("authError").hidden = false;
+                    $("authError").hidden = false;
 
-                        $("authError").textContent =
-                            authErrorMessage(error);
-                    }
-
- 
-                } else {
-
-                    const { data, error } =
-                        await supabaseClient.auth
-                            .signUp({
-                                email,
-                                password
-                            });
-
-
-                    if (error) {
-
-                        $("authError").hidden = false;
-
-                        $("authError").textContent =
-                            authErrorMessage(error);
-
-                        return;
-                    }
-
-
-                    if (!data.session) {
-
-
-                        $("authNotice").hidden = false;
-
-                        $("authNotice").textContent =
-                            "Account created! Check your email to confirm it, then log in.";
-
-                        setAuthMode("login");
-                    }
-
+                    $("authError").textContent =
+                        authErrorMessage(error);
                 }
 
-            } catch (err) {
+                // On success, onAuthStateChange (below)
+                // takes care of showing the app.
+
+            } else {
+
+                const { data, error } =
+                    await supabaseClient.auth
+                        .signUp({
+                            email,
+                            password
+                        });
 
 
-                console.error("Auth request failed:", err);
+                if (error) {
 
-                $("authError").hidden = false;
+                    $("authError").hidden = false;
 
-                $("authError").textContent =
-                    "Couldn't reach the server: " +
-                    (err?.message || "unknown error") +
-                    ". Check the console for details.";
+                    $("authError").textContent =
+                        authErrorMessage(error);
 
-            } finally {
+                    return;
+                }
 
-                submitBtn.disabled = false;
-                submitBtn.textContent = originalLabel;
+
+                if (!data.session) {
+
+                    // Email confirmation is required by
+                    // this Supabase project's auth settings
+
+                    $("authNotice").hidden = false;
+
+                    $("authNotice").textContent =
+                        "Account created! Check your email to confirm it, then log in.";
+
+                    setAuthMode("login");
+                }
+
+                // If data.session exists, email confirmation
+                // is off and onAuthStateChange logs them in
+                // automatically.
             }
         }
     );
 
 
 
+// ==========================================
+// AUTH: SIGN OUT
+// ==========================================
 
 $("signOutBtn")
     .addEventListener(
@@ -1348,6 +1564,9 @@ $("signOutBtn")
     );
 
 
+
+// ==========================================
+// AUTH: STATE CHANGE (GATES THE WHOLE APP)
 // ==========================================
 
 supabaseClient.auth.onAuthStateChange(
@@ -1355,6 +1574,7 @@ supabaseClient.auth.onAuthStateChange(
 
         if (session?.user) {
 
+            // Signed in: show the app, load their history
 
             $("authScreen").hidden = true;
             $("appShell").hidden = false;
@@ -1372,6 +1592,7 @@ supabaseClient.auth.onAuthStateChange(
 
         } else {
 
+            // Signed out: show the auth gate, hide the app
 
             database = null;
 
