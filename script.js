@@ -8,9 +8,78 @@
     - KeywordAnalyzer
     - SourceAnalyzer
     - SimilarityAnalyzer
+    - AttributionAnalyzer
     - CredibilityReport
     - NewsDatabase
 */
+
+
+// ==========================================
+// LEVENSHTEIN DISTANCE (edit distance)
+// ==========================================
+// Classic dynamic-programming DSA algorithm. Used by SourceAnalyzer
+// to catch "impersonation" source names — fake outlets that mimic a
+// trusted brand with a small typo or extra word, e.g. "Reutters",
+// "BBC-News-Now", "The New York Times Today". A plain equality or
+// substring check misses these; edit distance catches "close but
+// not exact" matches.
+
+function levenshteinDistance(a, b) {
+
+    const rows = a.length + 1;
+    const cols = b.length + 1;
+
+    const dp =
+        Array.from(
+            { length: rows },
+            () => new Array(cols).fill(0)
+        );
+
+    for (let i = 0; i < rows; i++) dp[i][0] = i;
+    for (let j = 0; j < cols; j++) dp[0][j] = j;
+
+    for (let i = 1; i < rows; i++) {
+
+        for (let j = 1; j < cols; j++) {
+
+            if (a[i - 1] === b[j - 1]) {
+
+                dp[i][j] = dp[i - 1][j - 1];
+
+            } else {
+
+                dp[i][j] = 1 + Math.min(
+                    dp[i - 1][j - 1], // substitution
+                    dp[i - 1][j],     // deletion
+                    dp[i][j - 1]      // insertion
+                );
+            }
+        }
+    }
+
+    return dp[rows - 1][cols - 1];
+}
+
+
+// ==========================================
+// SOURCE NAME NORMALIZATION
+// ==========================================
+// Shared by SourceAnalyzer for both the lookup table's keys and the
+// user-typed source name, so "Reuters", "reuters.com", and
+// "www.reuters.com" all normalize to the same key. Previously this
+// was only applied to the typed name, not the table's own keys —
+// meaning any key containing punctuation (e.g. "example-blacklist
+// .com") could silently fail to match itself.
+
+function normalizeSourceName(name) {
+
+    return name
+        .toLowerCase()
+        .trim()
+        .replace(/^www\./, "")
+        .replace(/\.(com|net|org|ph|co)$/, "")
+        .replace(/[^a-z0-9\s]/g, "");
+}
 
 
 const SUPABASE_URL = "https://phcnrnprkndjhztrvauh.supabase.co";
@@ -196,7 +265,13 @@ class KeywordAnalyzer
 
         const commonAcronyms = new Set([
             "usa", "uk", "un", "eu", "who", "nba", "nfl", "ceo",
-            "faq", "fbi", "cia", "gdp", "covid", "ai", "us"
+            "faq", "fbi", "cia", "gdp", "covid", "ai", "us",
+            // News-organization acronyms, so headlines/bodies that
+            // simply mention a real outlet by its short name aren't
+            // mistaken for "shouting".
+            "bbc", "cnn", "npr", "abc", "nbc", "cbs", "fox", "afp",
+            "upi", "pbs", "nyt", "wsj", "ap", "pna", "gma",
+            "nasa", "fda", "cdc", "nato", "dna", "gps"
         ]);
 
         const words =
@@ -358,35 +433,84 @@ class SourceAnalyzer
 
         super();
 
-        // Hash Map equivalent
+        // Hash Map equivalent. Keys are normalized here too (not
+        // just the incoming article's source name) — otherwise a
+        // table key containing punctuation, like
+        // "example-blacklist.com", would never match its own
+        // normalized form and would silently fall through to
+        // "unverified" instead of "blacklisted".
 
         this.sourceTable =
             new Map(
                 Object.entries(sourceTable)
+                    .map(([key, source]) =>
+                        [normalizeSourceName(key), source]
+                    )
             );
+
+        // Precompute the list of trusted-source keys once, so each
+        // analyze() call doesn't have to re-filter the whole table
+        // just to run the impersonation check below.
+
+        this.trustedKeys =
+            [...this.sourceTable.entries()]
+                .filter(([, source]) => source.rating === "trusted")
+                .map(([key]) => key);
     }
 
 
     analyze(article) {
 
-        // Normalize: lowercase, strip a leading "www.", strip a
-        // trailing top-level domain, and trim punctuation, so that
-        // "Reuters", "reuters.com", and "www.reuters.com" all match
-        // the same table entry instead of only exact typed strings.
+        const key = normalizeSourceName(article.sourceName);
 
-        const normalize = (name) =>
-            name
-                .toLowerCase()
-                .trim()
-                .replace(/^www\./, "")
-                .replace(/\.(com|net|org|ph|co)$/, "")
-                .replace(/[^a-z0-9\s]/g, "");
+        const exactMatch = this.sourceTable.get(key);
 
-        const key = normalize(article.sourceName);
+
+        // If there's no exact match, check whether the name is
+        // SUSPICIOUSLY CLOSE to a known trusted source — a classic
+        // fake-news tactic is registering "Reutters" or "BBC-News-
+        // Now" to borrow a real outlet's credibility. Edit distance
+        // catches this; a plain equality check can't.
+
+        let impersonationTarget = null;
+
+        if (!exactMatch && key.length >= 4) {
+
+            let bestDistance = Infinity;
+            let bestKey = null;
+
+            for (const trustedKey of this.trustedKeys) {
+
+                const distance =
+                    levenshteinDistance(key, trustedKey);
+
+                if (distance < bestDistance) {
+
+                    bestDistance = distance;
+                    bestKey = trustedKey;
+                }
+            }
+
+            // A small edit distance relative to name length means
+            // "very close but not identical" — exactly what a
+            // typosquatted or copycat name looks like. Require
+            // distance > 0 so an actual exact match (already
+            // handled above) isn't double-flagged.
+
+            if (
+                bestKey &&
+                bestDistance > 0 &&
+                bestDistance <= 2
+            ) {
+
+                impersonationTarget =
+                    this.sourceTable.get(bestKey).name;
+            }
+        }
 
 
         const source =
-            this.sourceTable.get(key)
+            exactMatch
             ||
             new Source(
                 article.sourceName,
@@ -395,40 +519,66 @@ class SourceAnalyzer
             );
 
 
-        // Use the source's continuous "weight" (0-100 trust score)
-        // rather than only three flat buckets. This lets two
-        // "unverified" sources, or two "trusted" sources, still be
-        // told apart if their known reputational weight differs —
-        // a graduated score is more accurate than a step function.
-
-        let suspicion =
-            Math.round(100 - source.weight);
+        let suspicion;
+        let isBlacklisted = false;
 
 
-        // Still respect the rating as a hard floor/ceiling so a
-        // blacklisted source can never look better than "very
-        // suspicious", and a trusted source never worse than
-        // "fairly credible", regardless of its numeric weight.
+        if (impersonationTarget) {
 
-        if (source.rating === "blacklisted") {
+            // Treat likely impersonation as seriously as an
+            // outright blacklisted source: borrowing a trusted
+            // brand's near-identical name is a strong deception
+            // signal on its own, regardless of article content.
 
-            suspicion = Math.max(suspicion, 80);
-
-        } else if (source.rating === "trusted") {
-
-            suspicion = Math.min(suspicion, 20);
+            suspicion = 88;
+            isBlacklisted = true;
 
         } else {
 
-            // unverified: keep within a moderate suspicion band
-            suspicion = Math.min(Math.max(suspicion, 35), 65);
+            // Use the source's continuous "weight" (0-100 trust
+            // score) rather than only three flat buckets. This lets
+            // two "unverified" sources, or two "trusted" sources,
+            // still be told apart if their known reputational
+            // weight differs — a graduated score is more accurate
+            // than a step function.
+
+            suspicion =
+                Math.round(100 - source.weight);
+
+
+            // Still respect the rating as a hard floor/ceiling so a
+            // blacklisted source can never look better than "very
+            // suspicious", and a trusted source never worse than
+            // "fairly credible", regardless of its numeric weight.
+
+            if (source.rating === "blacklisted") {
+
+                suspicion = Math.max(suspicion, 80);
+                isBlacklisted = true;
+
+            } else if (source.rating === "trusted") {
+
+                suspicion = Math.min(suspicion, 20);
+
+            } else {
+
+                // unverified: keep within a moderate suspicion band
+                suspicion = Math.min(Math.max(suspicion, 35), 65);
+            }
         }
 
 
         let reason;
 
 
-        if (
+        if (impersonationTarget) {
+
+            reason =
+                `Source "${article.sourceName}" closely resembles the trusted outlet ` +
+                `"${impersonationTarget}" but does not match it exactly — this is a common ` +
+                `impersonation/typosquatting pattern.`;
+
+        } else if (
             source.rating === "trusted"
         ) {
 
@@ -460,6 +610,9 @@ class SourceAnalyzer
 
             credibility:
                 100 - suspicion,
+
+            isBlacklisted:
+                isBlacklisted,
 
             reason:
                 reason
@@ -641,6 +794,184 @@ class SimilarityAnalyzer
 
 
 // ==========================================
+// ATTRIBUTION & LANGUAGE ANALYZER
+// ==========================================
+// Checks for vague-sourcing phrases ("sources say", "many believe")
+// and absolutist/loaded language ("always", "everyone", "no one"),
+// both of which are common in fabricated or unverifiable stories.
+// Gives partial credit back for genuine attribution markers (direct
+// quotes, "according to", named "X said" constructions), since
+// well-sourced reporting should legitimately score lower suspicion.
+
+class AttributionAnalyzer
+    extends Analyzer {
+
+    constructor() {
+
+        super();
+
+        // Hash Map equivalent: phrase -> severity weight
+
+        this.vaguePhrases = new Map([
+
+            ["sources say", 8],
+            ["sources close to", 8],
+            ["insiders claim", 9],
+            ["insiders reveal", 9],
+            ["some people say", 9],
+            ["some are saying", 8],
+            ["many believe", 7],
+            ["it is believed", 7],
+            ["reports suggest", 6],
+            ["it has been reported", 6],
+            ["rumor has it", 9],
+            ["rumor has", 9],
+            ["no one is talking about", 9],
+            ["studies show", 5],
+            ["research shows", 5],
+            ["allegedly", 4]
+        ]);
+
+
+        this.absolutistWords = [
+            "always", "never", "everyone", "no one",
+            "completely", "totally", "every single",
+            "without exception"
+        ];
+    }
+
+
+    analyze(article) {
+
+        const text =
+            `${article.headline} ${article.body}`;
+
+        const lower =
+            text.toLowerCase();
+
+
+        const vagueHits = [];
+
+        for (const [phrase, weight] of this.vaguePhrases) {
+
+            if (lower.includes(phrase)) {
+
+                vagueHits.push({ phrase, weight });
+            }
+        }
+
+
+        const absolutistHits =
+            this.absolutistWords.filter(
+                word =>
+                    new RegExp(`\\b${word}\\b`, "i").test(lower)
+            );
+
+
+        // Positive signals: real reporting usually contains direct
+        // quotes and clear attribution ("according to...", "X said
+        // ..."). Their presence should lower suspicion, not just
+        // the absence of red flags raise it.
+
+        const quoteCount =
+            (text.match(/["“”]/g) || []).length;
+
+        const hasAccordingTo =
+            /according to/i.test(text);
+
+        const namedAttribution =
+            /\b[A-Z][a-z]+ (?:said|stated|told|explained|confirmed|announced)\b/
+                .test(text);
+
+
+        let suspicion = 0;
+
+
+        suspicion += Math.min(
+            35,
+            vagueHits.reduce((sum, hit) => sum + hit.weight, 0)
+        );
+
+
+        suspicion += Math.min(
+            20,
+            absolutistHits.length * 7
+        );
+
+
+        let attributionCredit = 0;
+
+        if (quoteCount >= 2) attributionCredit += 10;
+        if (hasAccordingTo) attributionCredit += 8;
+        if (namedAttribution) attributionCredit += 10;
+
+        suspicion = Math.max(0, suspicion - attributionCredit);
+
+        suspicion =
+            Math.min(100, Math.round(suspicion));
+
+
+        const reasons = [];
+
+
+        if (vagueHits.length) {
+
+            const names = vagueHits
+                .sort((a, b) => b.weight - a.weight)
+                .slice(0, 3)
+                .map(hit => hit.phrase);
+
+            reasons.push(
+                `Found ${vagueHits.length} vague-sourcing phrase(s): ` +
+                `${names.join(", ")}` +
+                `${vagueHits.length > 3 ? "..." : ""}.`
+            );
+        }
+
+
+        if (absolutistHits.length) {
+
+            reasons.push(
+                `Absolutist language detected (${absolutistHits.slice(0, 3).join(", ")}).`
+            );
+        }
+
+
+        if (attributionCredit > 0) {
+
+            reasons.push(
+                "Direct quotes or clear named attribution were found, which supports credibility."
+            );
+        }
+
+
+        if (!reasons.length) {
+
+            reasons.push(
+                "No notable vague-sourcing or absolutist language patterns were detected."
+            );
+        }
+
+
+        return {
+
+            name:
+                "Attribution & Language Analyzer",
+
+            suspicion: suspicion,
+
+            credibility:
+                100 - suspicion,
+
+            reason:
+                reasons.join(" ")
+        };
+    }
+}
+
+
+
+// ==========================================
 // CREDIBILITY REPORT
 // ==========================================
 
@@ -651,17 +982,23 @@ class CredibilityReport {
         this.results = results;
 
 
-        // Weighted scoring
+        // Weighted scoring. Rebalanced now that a 4th analyzer
+        // (Attribution & Language) contributes a signal that used
+        // to have no home — vague sourcing and loaded language
+        // aren't clickbait keywords, but they're just as telling.
 
         const weights = {
 
             "Source Reputation Analyzer":
-                0.35,
+                0.30,
 
             "Keyword & Text Pattern Analyzer":
-                0.40,
+                0.30,
 
             "Headline/Body Similarity Analyzer":
+                0.15,
+
+            "Attribution & Language Analyzer":
                 0.25
         };
 
@@ -680,6 +1017,23 @@ class CredibilityReport {
                     0
                 )
             );
+
+
+        // Hard override: a blacklisted or impersonating source is
+        // disqualifying on its own. Without this, a fake outlet
+        // that writes cleanly (no clickbait words, decent
+        // attribution) could still average out to "Uncertain" or
+        // better, even though its source alone is a red flag no
+        // amount of good prose should outweigh.
+
+        const hasDisqualifyingSource =
+            results.some(result => result.isBlacklisted);
+
+        if (hasDisqualifyingSource) {
+
+            this.credibility =
+                Math.min(this.credibility, 25);
+        }
 
 
         this.suspicion =
@@ -927,7 +1281,9 @@ const analyzers = [
 
     new KeywordAnalyzer(),
 
-    new SimilarityAnalyzer()
+    new SimilarityAnalyzer(),
+
+    new AttributionAnalyzer()
 ];
 
 
