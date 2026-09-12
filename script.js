@@ -972,6 +972,215 @@ class AttributionAnalyzer
 
 
 // ==========================================
+// FACT CHECK ANALYZER
+// ==========================================
+// Unlike every other analyzer here, this one doesn't infer
+// credibility from writing STYLE — it queries Google's Fact Check
+// Tools API, which searches a database of claims that professional
+// fact-checkers (Reuters Fact Check, PolitiFact, Snopes, AFP
+// Fact Check, etc.) have already reviewed. If the headline matches
+// a claim someone has actually checked, we get a real verdict
+// instead of a style-based guess. Most headlines won't have a
+// match — that's expected and handled as "no data", not as
+// evidence of anything.
+
+const FACTCHECK_API_KEY = "AIzaSyBuxp1fVsjNar8yRKSSRIf57XDjFhmPzSQ";
+
+class FactCheckAnalyzer
+    extends Analyzer {
+
+    constructor(apiKey) {
+
+        super();
+
+        this.apiKey = apiKey;
+    }
+
+
+    // Ratings fact-checkers use to mean "this claim is false"
+    ratingIndicatesFalse(rating) {
+
+        const r = rating.toLowerCase();
+
+        return [
+            "false", "fake", "fabricated", "incorrect",
+            "misleading", "pants on fire", "mostly false",
+            "distorted", "unsupported", "no evidence",
+            "scam", "hoax"
+        ].some(word => r.includes(word));
+    }
+
+
+    // Ratings fact-checkers use to mean "this claim is true"
+    ratingIndicatesTrue(rating) {
+
+        const r = rating.toLowerCase();
+
+        return [
+            "true", "correct", "accurate", "mostly true",
+            "confirmed", "verified", "real"
+        ].some(word => r.includes(word))
+            && !this.ratingIndicatesFalse(rating);
+    }
+
+
+    async analyze(article) {
+
+        // No key configured: behave as "no data available" rather
+        // than throwing, so the rest of the app still works if
+        // someone removes the key.
+
+        if (!this.apiKey) {
+
+            return this.noMatchResult(
+                "Fact-check lookup is not configured (no API key set)."
+            );
+        }
+
+
+        // Use the headline as the search query — the Fact Check
+        // API matches best against short claim-like text, not a
+        // full article body.
+
+        const query =
+            encodeURIComponent(
+                article.headline.slice(0, 200)
+            );
+
+        const url =
+            `https://factchecktools.googleapis.com/v1alpha1/claims:search` +
+            `?query=${query}&key=${this.apiKey}`;
+
+
+        let data;
+
+        try {
+
+            const response = await fetch(url);
+
+            if (!response.ok) {
+
+                console.error(
+                    "Fact Check API request failed:",
+                    response.status
+                );
+
+                return this.noMatchResult(
+                    "Fact-check lookup failed (network or API error). Falling back to other signals."
+                );
+            }
+
+            data = await response.json();
+
+        } catch (error) {
+
+            console.error(
+                "Fact Check API error:",
+                error.message
+            );
+
+            return this.noMatchResult(
+                "Fact-check lookup failed (network or API error). Falling back to other signals."
+            );
+        }
+
+
+        if (!data.claims || !data.claims.length) {
+
+            return this.noMatchResult(
+                "No matching fact-check found for this headline."
+            );
+        }
+
+
+        // Use the first claim's first review as the verdict.
+
+        const claim = data.claims[0];
+
+        const review =
+            claim.claimReview && claim.claimReview[0];
+
+        if (!review || !review.textualRating) {
+
+            return this.noMatchResult(
+                "A related claim was found, but no clear rating was attached to it."
+            );
+        }
+
+
+        const rating = review.textualRating;
+        const publisher =
+            (review.publisher && review.publisher.name) ||
+            "a fact-checking organization";
+
+
+        let suspicion;
+        let verifiedFalse = false;
+        let verifiedTrue = false;
+
+        if (this.ratingIndicatesFalse(rating)) {
+
+            suspicion = 95;
+            verifiedFalse = true;
+
+        } else if (this.ratingIndicatesTrue(rating)) {
+
+            suspicion = 5;
+            verifiedTrue = true;
+
+        } else {
+
+            // Ambiguous rating (e.g. "Mixture", "Unproven",
+            // "Outdated") — treat as genuinely uncertain rather
+            // than guessing a direction.
+            suspicion = 50;
+        }
+
+
+        return {
+
+            name:
+                "Fact Check Analyzer",
+
+            suspicion: suspicion,
+
+            credibility:
+                100 - suspicion,
+
+            hasMatch: true,
+
+            isVerifiedFalse: verifiedFalse,
+            isVerifiedTrue: verifiedTrue,
+
+            reason:
+                `${publisher} rated a related claim as "${rating}"` +
+                (review.url ? ` (${review.url})` : "") +
+                "."
+        };
+    }
+
+
+    noMatchResult(reason) {
+
+        return {
+
+            name:
+                "Fact Check Analyzer",
+
+            suspicion: 50,
+
+            credibility: 50,
+
+            hasMatch: false,
+
+            reason: reason
+        };
+    }
+}
+
+
+
+// ==========================================
 // CREDIBILITY REPORT
 // ==========================================
 
@@ -982,25 +1191,56 @@ class CredibilityReport {
         this.results = results;
 
 
-        // Weighted scoring. Rebalanced now that a 4th analyzer
-        // (Attribution & Language) contributes a signal that used
-        // to have no home — vague sourcing and loaded language
-        // aren't clickbait keywords, but they're just as telling.
+        // Base weights, used when the Fact Check Analyzer found a
+        // real match. When it DIDN'T find a match, its weight is
+        // redistributed proportionally to the other four analyzers
+        // instead of counting its neutral 50/50 placeholder toward
+        // the average — "no data" is not evidence of anything and
+        // shouldn't quietly drag every score toward the middle.
 
-        const weights = {
+        const baseWeights = {
 
             "Source Reputation Analyzer":
-                0.30,
+                0.25,
 
             "Keyword & Text Pattern Analyzer":
-                0.30,
+                0.25,
 
             "Headline/Body Similarity Analyzer":
-                0.15,
+                0.10,
 
             "Attribution & Language Analyzer":
+                0.15,
+
+            "Fact Check Analyzer":
                 0.25
         };
+
+
+        const factCheckResult =
+            results.find(result => result.name === "Fact Check Analyzer");
+
+        const factCheckMatched =
+            factCheckResult && factCheckResult.hasMatch;
+
+
+        let weights = baseWeights;
+
+        if (!factCheckMatched) {
+
+            const remainingTotal =
+                1 - baseWeights["Fact Check Analyzer"];
+
+            weights = {};
+
+            for (const name in baseWeights) {
+
+                weights[name] =
+                    name === "Fact Check Analyzer"
+                        ? 0
+                        : baseWeights[name] / remainingTotal;
+            }
+        }
 
 
         this.credibility =
@@ -1012,7 +1252,7 @@ class CredibilityReport {
 
                         sum +
                         result.credibility *
-                        weights[result.name],
+                        (weights[result.name] || 0),
 
                     0
                 )
@@ -1033,6 +1273,27 @@ class CredibilityReport {
 
             this.credibility =
                 Math.min(this.credibility, 25);
+        }
+
+
+        // Hard override: an actual fact-check verdict is stronger
+        // evidence than any style-based heuristic. If a real
+        // fact-checker rated the claim false, cap credibility low
+        // regardless of how "clean" the writing otherwise looks. If
+        // rated true, set a floor so unrelated style flags (e.g. an
+        // unverified source republishing a confirmed true story)
+        // don't drag a confirmed-true claim down.
+
+        if (factCheckResult && factCheckResult.isVerifiedFalse) {
+
+            this.credibility =
+                Math.min(this.credibility, 15);
+        }
+
+        if (factCheckResult && factCheckResult.isVerifiedTrue) {
+
+            this.credibility =
+                Math.max(this.credibility, 85);
         }
 
 
@@ -1283,7 +1544,9 @@ const analyzers = [
 
     new SimilarityAnalyzer(),
 
-    new AttributionAnalyzer()
+    new AttributionAnalyzer(),
+
+    new FactCheckAnalyzer(FACTCHECK_API_KEY)
 ];
 
 
@@ -1577,16 +1840,38 @@ $("newsForm")
                 );
 
 
-            // Run all analyzers
+            // Disable the button and show a loading label while
+            // the Fact Check Analyzer makes its network request —
+            // this is the one analyzer that isn't instant, so the
+            // UI should say so rather than appear to hang.
+
+            const submitBtn =
+                $("newsForm").querySelector("button[type=submit]");
+
+            const originalLabel = submitBtn.textContent;
+
+            submitBtn.disabled = true;
+            submitBtn.textContent = "Checking...";
+
+
+            // Run all analyzers. Most return a plain object
+            // synchronously; the Fact Check Analyzer returns a
+            // Promise (it calls an external API). Promise.all
+            // handles both transparently.
 
             const results =
-                analyzers.map(
-
-                    analyzer =>
-                        analyzer.analyze(
-                            article
-                        )
+                await Promise.all(
+                    analyzers.map(
+                        analyzer =>
+                            analyzer.analyze(
+                                article
+                            )
+                    )
                 );
+
+
+            submitBtn.disabled = false;
+            submitBtn.textContent = originalLabel;
 
 
             // Create report
