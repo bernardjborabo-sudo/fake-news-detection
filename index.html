@@ -9,7 +9,7 @@
 
 <body>
 
-
+<!-- AUTH SCREEN -->
 <div id="authScreen" class="auth-screen">
 
     <div class="auth-card">
@@ -47,6 +47,8 @@
 
 </div>
 
+
+<!-- APP SHELL (hidden until logged in) -->
 <div id="appShell" hidden>
 
 <header class="topbar">
@@ -69,14 +71,10 @@
 
 <main class="container">
 
-
+    <!-- HERO -->
     <section class="hero">
 
         <div>
-            <span class="eyebrow">
-
-            </span>
-
             <h2>
                 Check a news article before you share it.
             </h2>
@@ -97,9 +95,10 @@
     </section>
 
 
+    <!-- INPUT + RESULT -->
     <section class="grid">
 
-
+        <!-- INPUT -->
         <div class="card input-card">
 
             <div class="card-head">
@@ -192,7 +191,7 @@
         </div>
 
 
-
+        <!-- RESULT -->
         <div class="card result-card">
 
             <div class="card-head">
@@ -264,6 +263,7 @@
     </section>
 
 
+    <!-- HISTORY -->
     <section class="card">
 
         <div class="card-head">
@@ -299,7 +299,8 @@
 
     </section>
 
-    
+
+    <!-- INFORMATION -->
     <section class="info-grid">
 
         <div class="info-box">
@@ -343,7 +344,7 @@
 </footer>
 
 </div>
-
+<!-- END APP SHELL -->
 
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
