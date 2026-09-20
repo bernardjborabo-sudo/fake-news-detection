@@ -3,7 +3,7 @@
    ========================================== */
 
 // Updated with your Supabase Project URL and Anon Key:
-const SUPABASE_URL = "https://phcnrnprkndjhztrvauh.supabase.co/rest/v1/";
+const SUPABASE_URL = "https://phcnrnprkndjhztrvauh.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_deV_4p8S9sIjtb5tuHy82w_ENfY2y-t";
 
 // Initialize Supabase Client
