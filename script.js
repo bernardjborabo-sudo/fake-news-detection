@@ -1,144 +1,172 @@
 /* ==========================================
-   SUPABASE & GEMINI CONFIGURATION
+   SUPABASE & CONFIGURATION SETUP
    ========================================== */
 
-// 1. Supabase Credentials
 const SUPABASE_URL = "https://phcnrnprkndjhztrvauh.supabase.co";
-const SUPABASE_ANON_KEY = "sb_publishable_dev_4p8S9sIjtb5tuHy82w_ENfY2..."; // Replace with your full publishable key from Supabase
+const SUPABASE_ANON_KEY = "sb_publishable_dev_4p8S9sIjtb5tuHy82w_ENfY2..."; // Ensure your full publishable key is here
 
-// Initialize Supabase Client
 let supabaseClient = null;
+let currentAuthMode = "login"; // 'login' or 'signup'
+
+// Initialize Supabase Client safely
 if (typeof supabase !== "undefined") {
     supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 }
 
-// 2. Retrieve Gemini API Key from Local Storage
 function getGeminiApiKey() {
     return localStorage.getItem("GEMINI_API_KEY");
 }
 
 /* ==========================================
-   AUTHENTICATION HANDLERS
+   UI TAB SWITCHING
    ========================================== */
 
-async function handleLogin(email, password) {
-    const errorElement = document.getElementById("error-message");
-    if (errorElement) errorElement.innerText = "";
+function switchTab(mode) {
+    currentAuthMode = mode;
+    const loginTab = document.getElementById("tab-login");
+    const signupTab = document.getElementById("tab-signup");
+    const authBtn = document.getElementById("auth-btn");
+    const errorEl = document.getElementById("auth-error");
+    const successEl = document.getElementById("auth-success");
 
-    if (!supabaseClient) {
-        if (errorElement) errorElement.innerText = "Supabase client not initialized.";
-        return;
+    errorEl.innerText = "";
+    successEl.innerText = "";
+
+    if (mode === "login") {
+        loginTab.classList.add("active");
+        signupTab.classList.remove("active");
+        authBtn.innerText = "Log In";
+    } else {
+        signupTab.classList.add("active");
+        loginTab.classList.remove("active");
+        authBtn.innerText = "Sign Up";
     }
-
-    const { data, error } = await supabaseClient.auth.signInWithPassword({
-        email: email,
-        password: password
-    });
-
-    if (error) {
-        if (errorElement) errorElement.innerText = error.message;
-        console.error("Login Error:", error.message);
-        return;
-    }
-
-    console.log("Logged in successfully:", data);
-    alert("Login successful!");
-    // You can show the analyzer UI or redirect here
-}
-
-async function handleSignUp(email, password) {
-    const errorElement = document.getElementById("error-message");
-    if (errorElement) errorElement.innerText = "";
-
-    if (!supabaseClient) {
-        if (errorElement) errorElement.innerText = "Supabase client not initialized.";
-        return;
-    }
-
-    const { data, error } = await supabaseClient.auth.signUp({
-        email: email,
-        password: password
-    });
-
-    if (error) {
-        if (errorElement) errorElement.innerText = error.message;
-        console.error("Sign Up Error:", error.message);
-        return;
-    }
-
-    alert("Sign up successful! Please check your email for confirmation.");
 }
 
 /* ==========================================
-   GEMINI AI ANALYSIS HANDLER
+   AUTHENTICATION LOGIC
    ========================================== */
 
-async function analyzeArticleWithGemini(title, content) {
-    const apiKey = getGeminiApiKey();
+async function handleAuth(email, password) {
+    const errorEl = document.getElementById("auth-error");
+    const successEl = document.getElementById("auth-success");
+    errorEl.innerText = "";
+    successEl.innerText = "";
 
-    if (!apiKey) {
-        alert("Gemini API key missing! Please set it in DevTools console.");
+    if (!supabaseClient) {
+        errorEl.innerText = "Supabase SDK failed to initialize.";
         return;
     }
 
-    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+    if (currentAuthMode === "login") {
+        const { data, error } = await supabaseClient.auth.signInWithPassword({
+            email: email,
+            password: password
+        });
 
-    const promptText = `Analyze the following news article for credibility, bias, and potential fake news indicators:
-    
-Headline: ${title}
-Content: ${content}`;
+        if (error) {
+            errorEl.innerText = error.message;
+        } else {
+            showDashboard();
+        }
+    } else {
+        const { data, error } = await supabaseClient.auth.signUp({
+            email: email,
+            password: password
+        });
+
+        if (error) {
+            errorEl.innerText = error.message;
+        } else {
+            successEl.innerText = "Sign-up successful! Please log in.";
+            switchTab("login");
+        }
+    }
+}
+
+async function handleLogout() {
+    if (supabaseClient) {
+        await supabaseClient.auth.signOut();
+    }
+    document.getElementById("auth-container").classList.remove("hidden");
+    document.getElementById("app-container").classList.add("hidden");
+}
+
+function showDashboard() {
+    document.getElementById("auth-container").classList.add("hidden");
+    document.getElementById("app-container").classList.remove("hidden");
+}
+
+/* ==========================================
+   GEMINI AI ANALYSIS INTEGRATION
+   ========================================== */
+
+async function analyzeArticle(title, content) {
+    const apiKey = getGeminiApiKey();
+    const resultBox = document.getElementById("result-box");
+    const resultEl = document.getElementById("ai-result");
+
+    if (!apiKey) {
+        alert("Missing Gemini API Key! Please set it in DevTools console via localStorage.");
+        return;
+    }
+
+    resultBox.classList.remove("hidden");
+    resultEl.innerText = "Analyzing article with Gemini AI...";
+
+    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+    const promptText = `Perform a fact-check and credibility assessment on this text:\n\nTitle: ${title}\nContent: ${content}`;
 
     try {
         const response = await fetch(endpoint, {
             method: "POST",
-            headers: {
-                "Content-Type": "application/json"
-            },
+            headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-                contents: [
-                    {
-                        parts: [{ text: promptText }]
-                    }
-                ]
+                contents: [{ parts: [{ text: promptText }] }]
             })
         });
 
         const data = await response.json();
 
         if (data.error) {
-            console.error("Gemini API Error:", data.error.message);
-            alert(`AI Analysis Error: ${data.error.message}`);
-            return;
+            resultEl.innerText = "Error: " + data.error.message;
+        } else {
+            const aiText = data.candidates[0].content.parts[0].text;
+            resultEl.innerText = aiText;
         }
-
-        const aiResponseText = data.candidates[0].content.parts[0].text;
-        console.log("Gemini Analysis:", aiResponseText);
-        
-        // Display result in UI element if present
-        const resultElement = document.getElementById("ai-result");
-        if (resultElement) {
-            resultElement.innerText = aiResponseText;
-        }
-
     } catch (err) {
-        console.error("Fetch Error:", err);
-        alert("Failed to connect to Gemini API.");
+        resultEl.innerText = "Failed to connect to the AI analysis service.";
     }
 }
 
+function loadSampleData() {
+    document.getElementById("article-title").value = "Breaking: Scientists Discover Water on Mars surface";
+    document.getElementById("article-content").value = "Researchers have announced a significant geological finding confirming liquid water traces on Mars through satellite analysis...";
+}
+
 /* ==========================================
-   FORM EVENT LISTENERS
+   INITIALIZATION & EVENT LISTENERS
    ========================================== */
 
 document.addEventListener("DOMContentLoaded", () => {
-    const loginForm = document.getElementById("login-form");
+    const authForm = document.getElementById("auth-form");
+    const analysisForm = document.getElementById("analysis-form");
 
-    if (loginForm) {
-        loginForm.addEventListener("submit", (e) => {
+    if (authForm) {
+        authForm.addEventListener("submit", (e) => {
             e.preventDefault();
             const email = document.getElementById("email").value;
             const password = document.getElementById("password").value;
-            handleLogin(email, password);
+            handleAuth(email, password);
+        });
+    }
+
+    if (analysisForm) {
+        analysisForm.addEventListener("submit", (e) => {
+            e.preventDefault();
+            const title = document.getElementById("article-title").value;
+            const content = document.getElementById("article-content").value;
+            analyzeArticle(title, content);
         });
     }
 });
