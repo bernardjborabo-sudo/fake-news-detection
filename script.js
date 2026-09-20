@@ -972,21 +972,23 @@ class AttributionAnalyzer
 
 
 // ==========================================
-// FACT CHECK ANALYZER
+// AI CREDIBILITY ANALYZER (Gemini)
 // ==========================================
 // Unlike every other analyzer here, this one doesn't infer
-// credibility from writing STYLE — it queries Google's Fact Check
-// Tools API, which searches a database of claims that professional
-// fact-checkers (Reuters Fact Check, PolitiFact, Snopes, AFP
-// Fact Check, etc.) have already reviewed. If the headline matches
-// a claim someone has actually checked, we get a real verdict
-// instead of a style-based guess. Most headlines won't have a
-// match — that's expected and handled as "no data", not as
-// evidence of anything.
+// credibility from writing STYLE — it sends the headline and
+// article text to Google's Gemini API and asks the model to judge
+// the claim itself, using its own knowledge and reasoning. This
+// means it can give a real opinion on ANY article, not just ones a
+// human fact-checker has already reviewed.
+//
+// Get a free key at https://aistudio.google.com/apikey (no card,
+// no billing setup needed for the free tier) and paste it below.
 
-const FACTCHECK_API_KEY = "AIzaSyBuxp1fVsjNar8yRKSSRIf57XDjFhmPzSQ";
+const GEMINI_API_KEY = "AQ.Ab8RN6Ly4bJegqhdsJaLrJ8ySB7HQujyrqfrMaiw1qNYz5MCWQ";
 
-class FactCheckAnalyzer
+const GEMINI_MODEL = "gemini-2.5-flash";
+
+class AICredibilityAnalyzer
     extends Analyzer {
 
     constructor(apiKey) {
@@ -997,76 +999,91 @@ class FactCheckAnalyzer
     }
 
 
-    // Ratings fact-checkers use to mean "this claim is false"
-    ratingIndicatesFalse(rating) {
-
-        const r = rating.toLowerCase();
-
-        return [
-            "false", "fake", "fabricated", "incorrect",
-            "misleading", "pants on fire", "mostly false",
-            "distorted", "unsupported", "no evidence",
-            "scam", "hoax"
-        ].some(word => r.includes(word));
-    }
-
-
-    // Ratings fact-checkers use to mean "this claim is true"
-    ratingIndicatesTrue(rating) {
-
-        const r = rating.toLowerCase();
-
-        return [
-            "true", "correct", "accurate", "mostly true",
-            "confirmed", "verified", "real"
-        ].some(word => r.includes(word))
-            && !this.ratingIndicatesFalse(rating);
-    }
-
-
     async analyze(article) {
 
         // No key configured: behave as "no data available" rather
         // than throwing, so the rest of the app still works if
-        // someone removes the key.
+        // someone forgets to set the key.
 
-        if (!this.apiKey) {
+        if (
+            !this.apiKey ||
+            this.apiKey === "PASTE_YOUR_GEMINI_API_KEY_HERE"
+        ) {
 
-            return this.noMatchResult(
-                "Fact-check lookup is not configured (no API key set)."
+            return this.noDataResult(
+                "AI credibility check is not configured (no Gemini API key set)."
             );
         }
 
 
-        // Use the headline as the search query — the Fact Check
-        // API matches best against short claim-like text, not a
-        // full article body.
-
-        const query =
-            encodeURIComponent(
-                article.headline.slice(0, 200)
-            );
-
         const url =
-            `https://factchecktools.googleapis.com/v1alpha1/claims:search` +
-            `?query=${query}&key=${this.apiKey}`;
+            `https://generativelanguage.googleapis.com/v1beta/models/` +
+            `${GEMINI_MODEL}:generateContent`;
+
+
+        // Ask for a strict JSON object back, so we never have to
+        // parse free-form prose out of the model's reply.
+
+        const prompt =
+            `You are a fact-checking assistant. Judge how credible ` +
+            `the following news article is, using your own ` +
+            `knowledge of real events, common misinformation ` +
+            `patterns, and journalistic red flags.\n\n` +
+            `Headline: ${article.headline}\n` +
+            `Source: ${article.sourceName}\n` +
+            `Date: ${article.date}\n` +
+            `Article text: ${article.body.slice(0, 4000)}\n\n` +
+            `Respond with a suspicion score from 0 (completely ` +
+            `credible) to 100 (almost certainly false or ` +
+            `fabricated), plus a one- to two-sentence reason.`;
+
+        const requestBody = {
+
+            contents: [{
+                parts: [{ text: prompt }]
+            }],
+
+            generationConfig: {
+
+                responseMimeType: "application/json",
+
+                responseSchema: {
+                    type: "OBJECT",
+                    properties: {
+                        suspicion: { type: "NUMBER" },
+                        reason: { type: "STRING" }
+                    },
+                    required: ["suspicion", "reason"]
+                }
+            }
+        };
 
 
         let data;
 
         try {
 
-            const response = await fetch(url);
+            const response = await fetch(url, {
+
+                method: "POST",
+
+                headers: {
+                    "Content-Type": "application/json",
+                    "x-goog-api-key": this.apiKey
+                },
+
+                body: JSON.stringify(requestBody)
+            });
 
             if (!response.ok) {
 
                 console.error(
-                    "Fact Check API request failed:",
+                    "Gemini API request failed:",
                     response.status
                 );
 
-                return this.noMatchResult(
-                    "Fact-check lookup failed (network or API error). Falling back to other signals."
+                return this.noDataResult(
+                    "AI credibility check failed (network or API error). Falling back to other signals."
                 );
             }
 
@@ -1075,72 +1092,52 @@ class FactCheckAnalyzer
         } catch (error) {
 
             console.error(
-                "Fact Check API error:",
+                "Gemini API error:",
                 error.message
             );
 
-            return this.noMatchResult(
-                "Fact-check lookup failed (network or API error). Falling back to other signals."
+            return this.noDataResult(
+                "AI credibility check failed (network or API error). Falling back to other signals."
             );
         }
 
 
-        if (!data.claims || !data.claims.length) {
+        let parsed;
 
-            return this.noMatchResult(
-                "No matching fact-check found for this headline."
+        try {
+
+            const text =
+                data.candidates[0].content.parts[0].text;
+
+            parsed = JSON.parse(text);
+
+        } catch (error) {
+
+            console.error(
+                "Gemini response parsing error:",
+                error.message,
+                data
+            );
+
+            return this.noDataResult(
+                "AI credibility check returned an unreadable response. Falling back to other signals."
             );
         }
 
 
-        // Use the first claim's first review as the verdict.
+        // Clamp in case the model returns something outside 0-100.
 
-        const claim = data.claims[0];
-
-        const review =
-            claim.claimReview && claim.claimReview[0];
-
-        if (!review || !review.textualRating) {
-
-            return this.noMatchResult(
-                "A related claim was found, but no clear rating was attached to it."
+        const suspicion =
+            Math.min(
+                100,
+                Math.max(0, Math.round(parsed.suspicion))
             );
-        }
-
-
-        const rating = review.textualRating;
-        const publisher =
-            (review.publisher && review.publisher.name) ||
-            "a fact-checking organization";
-
-
-        let suspicion;
-        let verifiedFalse = false;
-        let verifiedTrue = false;
-
-        if (this.ratingIndicatesFalse(rating)) {
-
-            suspicion = 95;
-            verifiedFalse = true;
-
-        } else if (this.ratingIndicatesTrue(rating)) {
-
-            suspicion = 5;
-            verifiedTrue = true;
-
-        } else {
-
-            // Ambiguous rating (e.g. "Mixture", "Unproven",
-            // "Outdated") — treat as genuinely uncertain rather
-            // than guessing a direction.
-            suspicion = 50;
-        }
 
 
         return {
 
             name:
-                "Fact Check Analyzer",
+                "AI Credibility Analyzer",
 
             suspicion: suspicion,
 
@@ -1149,23 +1146,19 @@ class FactCheckAnalyzer
 
             hasMatch: true,
 
-            isVerifiedFalse: verifiedFalse,
-            isVerifiedTrue: verifiedTrue,
-
             reason:
-                `${publisher} rated a related claim as "${rating}"` +
-                (review.url ? ` (${review.url})` : "") +
-                "."
+                parsed.reason ||
+                "The AI model did not provide a specific reason."
         };
     }
 
 
-    noMatchResult(reason) {
+    noDataResult(reason) {
 
         return {
 
             name:
-                "Fact Check Analyzer",
+                "AI Credibility Analyzer",
 
             suspicion: 50,
 
@@ -1191,12 +1184,13 @@ class CredibilityReport {
         this.results = results;
 
 
-        // Base weights, used when the Fact Check Analyzer found a
-        // real match. When it DIDN'T find a match, its weight is
-        // redistributed proportionally to the other four analyzers
-        // instead of counting its neutral 50/50 placeholder toward
-        // the average — "no data" is not evidence of anything and
-        // shouldn't quietly drag every score toward the middle.
+        // Base weights, used when the AI Credibility Analyzer
+        // successfully returned a judgment. When it DIDN'T (no key
+        // set, network/API error), its weight is redistributed
+        // proportionally to the other four analyzers instead of
+        // counting its neutral 50/50 placeholder toward the average
+        // — "no data" is not evidence of anything and shouldn't
+        // quietly drag every score toward the middle.
 
         const baseWeights = {
 
@@ -1212,31 +1206,31 @@ class CredibilityReport {
             "Attribution & Language Analyzer":
                 0.15,
 
-            "Fact Check Analyzer":
+            "AI Credibility Analyzer":
                 0.25
         };
 
 
-        const factCheckResult =
-            results.find(result => result.name === "Fact Check Analyzer");
+        const aiResult =
+            results.find(result => result.name === "AI Credibility Analyzer");
 
-        const factCheckMatched =
-            factCheckResult && factCheckResult.hasMatch;
+        const aiMatched =
+            aiResult && aiResult.hasMatch;
 
 
         let weights = baseWeights;
 
-        if (!factCheckMatched) {
+        if (!aiMatched) {
 
             const remainingTotal =
-                1 - baseWeights["Fact Check Analyzer"];
+                1 - baseWeights["AI Credibility Analyzer"];
 
             weights = {};
 
             for (const name in baseWeights) {
 
                 weights[name] =
-                    name === "Fact Check Analyzer"
+                    name === "AI Credibility Analyzer"
                         ? 0
                         : baseWeights[name] / remainingTotal;
             }
@@ -1273,27 +1267,6 @@ class CredibilityReport {
 
             this.credibility =
                 Math.min(this.credibility, 25);
-        }
-
-
-        // Hard override: an actual fact-check verdict is stronger
-        // evidence than any style-based heuristic. If a real
-        // fact-checker rated the claim false, cap credibility low
-        // regardless of how "clean" the writing otherwise looks. If
-        // rated true, set a floor so unrelated style flags (e.g. an
-        // unverified source republishing a confirmed true story)
-        // don't drag a confirmed-true claim down.
-
-        if (factCheckResult && factCheckResult.isVerifiedFalse) {
-
-            this.credibility =
-                Math.min(this.credibility, 15);
-        }
-
-        if (factCheckResult && factCheckResult.isVerifiedTrue) {
-
-            this.credibility =
-                Math.max(this.credibility, 85);
         }
 
 
@@ -1546,7 +1519,7 @@ const analyzers = [
 
     new AttributionAnalyzer(),
 
-    new FactCheckAnalyzer(FACTCHECK_API_KEY)
+    new AICredibilityAnalyzer(GEMINI_API_KEY)
 ];
 
 
@@ -1841,7 +1814,7 @@ $("newsForm")
 
 
             // Disable the button and show a loading label while
-            // the Fact Check Analyzer makes its network request —
+            // the AI Credibility Analyzer makes its network request —
             // this is the one analyzer that isn't instant, so the
             // UI should say so rather than appear to hang.
 
@@ -1855,7 +1828,7 @@ $("newsForm")
 
 
             // Run all analyzers. Most return a plain object
-            // synchronously; the Fact Check Analyzer returns a
+            // synchronously; the AI Credibility Analyzer returns a
             // Promise (it calls an external API). Promise.all
             // handles both transparently.
 
