@@ -2,13 +2,9 @@
    CONFIG & UTILITIES
    ========================================== */
 
-/* ==========================================
-   CONFIG & UTILITIES
-   ========================================== */
-
-// Insert your Supabase Project URL and Anon Key here:
-const SUPABASE_URL = "https://YOUR_PROJECT_ID.supabase.co";
-const SUPABASE_ANON_KEY = "YOUR_SUPABASE_ANON_KEY";
+// Updated with your Supabase Project URL and Anon Key:
+const SUPABASE_URL = "https://aoxxlyasawlkyllakewt.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFveHhseWFzYXdsa3lsbGFrZXd0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDEzNzc4MzMsImV4cCI6MjA1Njk1MzgzM30.6i-6T2iL2dYpQp0SInX8K-eG0q_L0jQ9s2-b91c_P6g";
 
 // Initialize Supabase Client
 let supabaseClient = null;
@@ -19,6 +15,7 @@ function getSupabase() {
     }
     return supabaseClient;
 }
+
 // Levenshtein Distance for edit distance / typosquatting check
 function levenshteinDistance(a, b) {
     const rows = a.length + 1;
@@ -300,7 +297,11 @@ class AIAssistantAnalyzer extends Analyzer {
             if (!response.ok) throw new Error(`HTTP ${response.status}`);
             const data = await response.json();
             const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
-            const parsed = JSON.parse(rawText.replace(/```json|```/g, "").trim());
+            
+            // Clean markdown blocks or extra text around JSON response
+            const cleanedText = rawText.replace(/```json|```/gi, "").trim();
+            const jsonMatch = cleanedText.match(/\{[\s\S]*\}/);
+            const parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : {};
 
             const credibility = Math.min(100, Math.max(0, parsed.credibilityScore ?? 50));
             return {
@@ -309,7 +310,7 @@ class AIAssistantAnalyzer extends Analyzer {
                 credibility,
                 hasMatch: true,
                 verdict: parsed.verdict || "Unverified",
-                reason: `[${parsed.verdict}] ${parsed.directAnswer}`
+                reason: `[${parsed.verdict || 'Unverified'}] ${parsed.directAnswer || 'Analysis complete.'}`
             };
         } catch (err) {
             console.warn("AI Assistant fallback:", err);
@@ -354,6 +355,9 @@ class CredibilityReport {
    ========================================== */
 
 document.addEventListener("DOMContentLoaded", () => {
+    // Initialize Supabase client
+    getSupabase();
+
     // UI Element References
     const authScreen = document.getElementById("authScreen");
     const appShell = document.getElementById("appShell");
@@ -427,15 +431,15 @@ document.addEventListener("DOMContentLoaded", () => {
     function handleSession(user) {
         currentUser = user;
         if (userEmailSpan) userEmailSpan.textContent = user.email;
-        authScreen.style.display = "none";
-        appShell.hidden = false;
+        if (authScreen) authScreen.style.display = "none";
+        if (appShell) appShell.hidden = false;
         loadHistory();
     }
 
     function handleSignOut() {
         currentUser = null;
-        appShell.hidden = true;
-        authScreen.style.display = "flex";
+        if (appShell) appShell.hidden = true;
+        if (authScreen) authScreen.style.display = "flex";
     }
 
     authForm?.addEventListener("submit", async (e) => {
@@ -444,7 +448,7 @@ document.addEventListener("DOMContentLoaded", () => {
         authNotice.hidden = true;
 
         if (!supabaseClient) {
-            authError.textContent = "Supabase configuration missing. Update SUPABASE_URL and SUPABASE_ANON_KEY.";
+            authError.textContent = "Supabase configuration missing. Check SUPABASE_URL and SUPABASE_ANON_KEY.";
             authError.hidden = false;
             return;
         }
@@ -581,26 +585,28 @@ document.addEventListener("DOMContentLoaded", () => {
             return;
         }
 
-        historyCount.textContent = `${data ? data.length : 0} checks`;
+        if (historyCount) historyCount.textContent = `${data ? data.length : 0} checks`;
 
         if (!data || data.length === 0) {
-            historyList.innerHTML = `<div class="empty-state">No previous checks recorded.</div>`;
+            if (historyList) historyList.innerHTML = `<div class="empty-state">No previous checks recorded.</div>`;
             return;
         }
 
-        historyList.innerHTML = data.map(item => `
-            <div class="history-item" style="padding: 12px; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; align-items: center;">
-                <div>
-                    <strong style="display: block; font-size: 0.95rem;">${item.headline}</strong>
-                    <span style="font-size: 0.8rem; color: #666;">Source: ${item.source} | Date: ${item.article_date || 'N/A'}</span>
+        if (historyList) {
+            historyList.innerHTML = data.map(item => `
+                <div class="history-item" style="padding: 12px; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; align-items: center;">
+                    <div>
+                        <strong style="display: block; font-size: 0.95rem;">${item.headline}</strong>
+                        <span style="font-size: 0.8rem; color: #666;">Source: ${item.source} | Date: ${item.article_date || 'N/A'}</span>
+                    </div>
+                    <div style="text-align: right;">
+                        <span class="pill ${item.credibility_score >= 70 ? 'success' : item.credibility_score >= 40 ? 'warning' : 'danger'}">
+                            ${item.credibility_score}% Score
+                        </span>
+                    </div>
                 </div>
-                <div style="text-align: right;">
-                    <span class="pill ${item.credibility_score >= 70 ? 'success' : item.credibility_score >= 40 ? 'warning' : 'danger'}">
-                        ${item.credibility_score}% Score
-                    </span>
-                </div>
-            </div>
-        `).join("");
+            `).join("");
+        }
     }
 
     clearAllBtn?.addEventListener("click", async () => {
