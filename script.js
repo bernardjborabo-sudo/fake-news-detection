@@ -9,7 +9,7 @@
     - SourceAnalyzer
     - SimilarityAnalyzer
     - AttributionAnalyzer
-    - FactCheckAnalyzer (AI-powered)
+    - AIAssistantAnalyzer (Replaces manual FactCheckAnalyzer)
     - CredibilityReport
 */
 
@@ -374,100 +374,79 @@ class AttributionAnalyzer extends Analyzer {
 }
 
 // ==========================================
-// AI-POWERED FACT CHECK ANALYZER
+// AI ASSISTANT ANALYZER (AUTOMATED EVALUATION)
 // ==========================================
-class FactCheckAnalyzer extends Analyzer {
+class AIAssistantAnalyzer extends Analyzer {
     constructor(apiKey = null) {
         super();
         this.apiKey = apiKey || localStorage.getItem('GEMINI_API_KEY') || localStorage.getItem('FACT_CHECK_API_KEY');
-        this.endpoint = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent";
     }
 
     async analyze(article) {
         if (!this.apiKey) {
-            return this.buildFallbackResult(
-                "Fact-check API key is missing. Set 'GEMINI_API_KEY' in localStorage or pass it into constructor."
-            );
+            return this.fallbackResult("Gemini API key is not configured. Skipping automated AI analysis.");
         }
 
-        const prompt = `You are an expert news fact-checker. Analyze the following news article for factual accuracy, known hoaxes, or misleading claims based on verified real-world knowledge.
+        try {
+            const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${this.apiKey}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    contents: [{
+                        parts: [{
+                            text: `Analyze this user's submitted news article and directly answer whether the claim is true or false.
 
 Headline: "${article.headline}"
 Source: "${article.sourceName}"
-Body Context: "${article.body.slice(0, 1000)}"
+Body: "${article.body.slice(0, 1000)}"
 
-Return ONLY a valid JSON object matching this structure:
+Instructions: Provide a clear answer so the user does not need to search manually.
+
+Return strictly valid JSON format matching this schema:
 {
-  "rating": "True" | "Mostly True" | "Mixed" | "Mostly False" | "False" | "Unverified",
-  "credibilityScore": <number 0-100>,
-  "summary": "<Concise 2-3 sentence fact-check summary>",
-  "keyEvidence": "<Key real-world evidence, context, or missing details>",
-  "detectedClaims": ["<Claim 1>", "<Claim 2>"]
-}`;
-
-        try {
-            const response = await fetch(`${this.endpoint}?key=${this.apiKey}`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    contents: [{
-                        parts: [{ text: prompt }]
-                    }],
-                    generationConfig: {
-                        temperature: 0.2,
-                        responseMimeType: "application/json"
-                    }
+  "directAnswer": "<Clear 1-2 sentence direct answer evaluating the article>",
+  "credibilityScore": <number between 0 and 100>,
+  "verdict": "<True | False | Misleading | Unverified>"
+}`
+                        }]
+                    }]
                 })
             });
 
             if (!response.ok) {
-                const errorData = await response.json().catch(() => ({}));
-                throw new Error(`API error HTTP ${response.status}: ${errorData.error?.message || response.statusText}`);
+                throw new Error(`HTTP Error ${response.status}`);
             }
 
             const data = await response.json();
-            const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text;
+            const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
+            const cleanJson = rawText.replace(/```json|```/g, "").trim();
+            const parsed = JSON.parse(cleanJson);
 
-            if (!rawText) {
-                throw new Error("Empty response received from AI model.");
-            }
-
-            const aiResult = JSON.parse(rawText);
-            const credibility = typeof aiResult.credibilityScore === "number"
-                ? Math.min(100, Math.max(0, aiResult.credibilityScore))
-                : 50;
+            const credibility = Math.min(100, Math.max(0, parsed.credibilityScore ?? 50));
 
             return {
-                name: "AI Fact Check Analyzer",
-                hasMatch: true,
-                rating: aiResult.rating || "Unverified",
-                credibility: credibility,
+                name: "AI Direct Answer Assistant",
                 suspicion: 100 - credibility,
-                reason: aiResult.summary || "AI analysis completed.",
-                details: {
-                    evidence: aiResult.keyEvidence || "No explicit evidence provided.",
-                    claims: aiResult.detectedClaims || []
-                }
+                credibility: credibility,
+                hasMatch: true,
+                verdict: parsed.verdict || "Unverified",
+                reason: parsed.directAnswer || "AI analysis completed."
             };
 
         } catch (error) {
-            console.error("AI Fact Check Analyzer Error:", error);
-            return this.buildFallbackResult(`Fact-check lookup failed (${error.message}).`);
+            console.warn("AI Assistant analysis failed:", error);
+            return this.fallbackResult("Could not process article through AI Assistant.");
         }
     }
 
-    buildFallbackResult(reason) {
+    fallbackResult(reason) {
         return {
-            name: "AI Fact Check Analyzer",
-            hasMatch: false,
-            rating: "Unverified",
-            credibility: 50,
+            name: "AI Direct Answer Assistant",
             suspicion: 50,
-            reason: reason,
-            details: {
-                evidence: "Unable to complete AI fact check.",
-                claims: []
-            }
+            credibility: 50,
+            hasMatch: false,
+            verdict: "Unverified",
+            reason: reason
         };
     }
 }
@@ -490,7 +469,7 @@ class CredibilityReport {
             let weight = 1;
 
             if (res.name.includes("Source Reputation")) weight = 2.5;
-            if (res.name.includes("Fact Check") && res.hasMatch) weight = 3.5;
+            if (res.name.includes("AI Direct Answer") && res.hasMatch) weight = 3.5;
 
             weightedScore += (res.credibility * weight);
             totalWeight += weight;
@@ -503,27 +482,5 @@ class CredibilityReport {
         if (score >= 80) return { title: "Authentic", badgeClass: "success" };
         if (score >= 50) return { title: "Uncertain", badgeClass: "warning" };
         return { title: "Fake / Misleading", badgeClass: "danger" };
-    }
-
-    /**
-     * Helper to render the complete analysis report to JSON or plain text log.
-     */
-    generateSummary() {
-        const score = this.calculateOverallScore();
-        const verdict = this.getVerdict(score);
-        const aiCheck = this.results.find(r => r.name.includes("AI Fact Check"));
-
-        return {
-            overallScore: score,
-            verdict: verdict.title,
-            badgeClass: verdict.badgeClass,
-            aiFactCheck: aiCheck ? {
-                rating: aiCheck.rating,
-                summary: aiCheck.reason,
-                evidence: aiCheck.details?.evidence,
-                claims: aiCheck.details?.claims
-            } : null,
-            breakdown: this.results
-        };
     }
 }
