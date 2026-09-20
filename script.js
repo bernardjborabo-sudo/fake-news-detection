@@ -3,7 +3,7 @@
    ========================================== */
 
 // Updated with your Supabase Project URL and Anon Key:
-const SUPABASE_URL = "https://aoxxlyasawlkyllakewt.supabase.co";
+const SUPABASE_URL = "https://phcnrnprkndjhztrvauh.supabase.co/rest/v1/";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFveHhseWFzYXdsa3lsbGFrZXd0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDEzNzc4MzMsImV4cCI6MjA1Njk1MzgzM30.6i-6T2iL2dYpQp0SInX8K-eG0q_L0jQ9s2-b91c_P6g";
 
 // Initialize Supabase Client
