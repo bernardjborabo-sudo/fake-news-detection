@@ -3,7 +3,7 @@
    ========================================== */
 
 const SUPABASE_URL = "https://phcnrnprkndjhztrvauh.supabase.co";
-const SUPABASE_ANON_KEY = "sb_publishable_dev_4p8S9sIjtb5tuHy82w_ENfY2..."; // Ensure your full publishable key is here
+const SUPABASE_ANON_KEY = "sb_publishable_deV_4p8S9sIjtb5tuHy82w_ENfY2y-t"; // Ensure your full publishable key is here
 
 let supabaseClient = null;
 let currentAuthMode = "login"; // 'login' or 'signup'
