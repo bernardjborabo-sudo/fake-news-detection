@@ -486,18 +486,37 @@ class CredibilityReport {
 }
 
 // ==========================================
-// SUPABASE AUTHENTICATION FIX
+// SUPABASE CLIENT INITIALIZATION & AUTH FIX
 // ==========================================
+
+// 1. Configure Supabase Credentials
+const SUPABASE_URL = "https://your-project-id.supabase.co"; // Replace with your URL
+const SUPABASE_ANON_KEY = "your-anon-key-here";            // Replace with your anon key
+
+let supabaseClient = null;
+
+// Create global client instance safely
+if (typeof supabase !== "undefined") {
+    supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+} else {
+    console.error("Supabase CDN script is missing from index.html.");
+}
+
+// 2. Attach Auth Event Handler
 document.addEventListener("DOMContentLoaded", () => {
-    // 1. Target form or container
     const authForm = document.querySelector("form") || document.querySelector(".auth-container");
 
     if (authForm) {
         authForm.addEventListener("submit", async (e) => {
-            // STOP page reload which causes input text to disappear
+            // Prevent page refresh / modal clearing
             e.preventDefault();
 
-            // Fetch input values safely
+            // Verify client readiness
+            if (!supabaseClient) {
+                alert("Authentication service is unavailable. Please check that Supabase CDN is included in index.html.");
+                return;
+            }
+
             const emailInput = document.querySelector('input[type="email"], input[placeholder*="email"]');
             const passwordInput = document.querySelector('input[type="password"]');
 
@@ -509,16 +528,9 @@ document.addEventListener("DOMContentLoaded", () => {
                 return;
             }
 
-            // Verify Supabase client initialized
-            if (typeof supabase === "undefined" || !supabase.auth) {
-                console.error("Supabase client is not loaded on this page.");
-                alert("Authentication service is unavailable. Check console for details.");
-                return;
-            }
-
             try {
-                // Call Supabase Authentication
-                const { data, error } = await supabase.auth.signInWithPassword({
+                // Call authentication API
+                const { data, error } = await supabaseClient.auth.signInWithPassword({
                     email: email,
                     password: password
                 });
@@ -530,13 +542,12 @@ document.addEventListener("DOMContentLoaded", () => {
                     console.log("Logged in successfully:", data);
                     alert("Login successful!");
                     
-                    // Hide auth modal if present
                     const authModal = document.getElementById("auth-modal") || document.querySelector(".modal");
                     if (authModal) authModal.style.display = "none";
                 }
             } catch (err) {
                 console.error("Unexpected login error:", err);
-                alert("An unexpected error occurred during login.");
+                alert("An unexpected error occurred during login. Check console for details.");
             }
         });
     }
