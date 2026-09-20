@@ -3,14 +3,19 @@
    ========================================== */
 
 const SUPABASE_URL = "https://phcnrnprkndjhztrvauh.supabase.co";
-const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBoY25ybnBya25kamh6dHJ2YXVoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg2MDQzNjAsImV4cCI6MjEwNDE4MDM2MH0.bP2189AdSbmQdf75XHWXcnZt3t30-h6WLZT14XfAVR8"; // Ensure your full publishable key is here
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBoY25ybnBya25kamh6dHJ2YXVoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg2MDQzNjAsImV4cCI6MjEwNDE4MDM2MH0.bP2189AdSbmQdf75XHWXcnZt3t30-h6WLZT14XfAVR8";
 
 let supabaseClient = null;
 let currentAuthMode = "login"; // 'login' or 'signup'
 
 // Initialize Supabase Client safely
 if (typeof supabase !== "undefined") {
-    supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+        auth: {
+            persistSession: true,
+            autoRefreshToken: true
+        }
+    });
 }
 
 function getGeminiApiKey() {
@@ -29,17 +34,17 @@ function switchTab(mode) {
     const errorEl = document.getElementById("auth-error");
     const successEl = document.getElementById("auth-success");
 
-    errorEl.innerText = "";
-    successEl.innerText = "";
+    if (errorEl) errorEl.innerText = "";
+    if (successEl) successEl.innerText = "";
 
     if (mode === "login") {
-        loginTab.classList.add("active");
-        signupTab.classList.remove("active");
-        authBtn.innerText = "Log In";
+        if (loginTab) loginTab.classList.add("active");
+        if (signupTab) signupTab.classList.remove("active");
+        if (authBtn) authBtn.innerText = "Log In";
     } else {
-        signupTab.classList.add("active");
-        loginTab.classList.remove("active");
-        authBtn.innerText = "Sign Up";
+        if (signupTab) signupTab.classList.add("active");
+        if (loginTab) loginTab.classList.remove("active");
+        if (authBtn) authBtn.innerText = "Sign Up";
     }
 }
 
@@ -50,11 +55,11 @@ function switchTab(mode) {
 async function handleAuth(email, password) {
     const errorEl = document.getElementById("auth-error");
     const successEl = document.getElementById("auth-success");
-    errorEl.innerText = "";
-    successEl.innerText = "";
+    if (errorEl) errorEl.innerText = "";
+    if (successEl) successEl.innerText = "";
 
     if (!supabaseClient) {
-        errorEl.innerText = "Supabase SDK failed to initialize.";
+        if (errorEl) errorEl.innerText = "Supabase SDK failed to initialize.";
         return;
     }
 
@@ -65,7 +70,7 @@ async function handleAuth(email, password) {
         });
 
         if (error) {
-            errorEl.innerText = error.message;
+            if (errorEl) errorEl.innerText = error.message;
         } else {
             showDashboard();
         }
@@ -76,9 +81,9 @@ async function handleAuth(email, password) {
         });
 
         if (error) {
-            errorEl.innerText = error.message;
+            if (errorEl) errorEl.innerText = error.message;
         } else {
-            successEl.innerText = "Sign-up successful! Please log in.";
+            if (successEl) successEl.innerText = "Sign-up successful! Please log in.";
             switchTab("login");
         }
     }
@@ -88,13 +93,19 @@ async function handleLogout() {
     if (supabaseClient) {
         await supabaseClient.auth.signOut();
     }
-    document.getElementById("auth-container").classList.remove("hidden");
-    document.getElementById("app-container").classList.add("hidden");
+    const authContainer = document.getElementById("auth-container");
+    const appContainer = document.getElementById("app-container");
+
+    if (authContainer) authContainer.classList.remove("hidden");
+    if (appContainer) appContainer.classList.add("hidden");
 }
 
 function showDashboard() {
-    document.getElementById("auth-container").classList.add("hidden");
-    document.getElementById("app-container").classList.remove("hidden");
+    const authContainer = document.getElementById("auth-container");
+    const appContainer = document.getElementById("app-container");
+
+    if (authContainer) authContainer.classList.add("hidden");
+    if (appContainer) appContainer.classList.remove("hidden");
 }
 
 /* ==========================================
@@ -111,8 +122,8 @@ async function analyzeArticle(title, content) {
         return;
     }
 
-    resultBox.classList.remove("hidden");
-    resultEl.innerText = "Analyzing article with Gemini AI...";
+    if (resultBox) resultBox.classList.remove("hidden");
+    if (resultEl) resultEl.innerText = "Analyzing article with Gemini AI...";
 
     const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
     const promptText = `Perform a fact-check and credibility assessment on this text:\n\nTitle: ${title}\nContent: ${content}`;
@@ -129,19 +140,22 @@ async function analyzeArticle(title, content) {
         const data = await response.json();
 
         if (data.error) {
-            resultEl.innerText = "Error: " + data.error.message;
+            if (resultEl) resultEl.innerText = "Error: " + data.error.message;
         } else {
             const aiText = data.candidates[0].content.parts[0].text;
-            resultEl.innerText = aiText;
+            if (resultEl) resultEl.innerText = aiText;
         }
     } catch (err) {
-        resultEl.innerText = "Failed to connect to the AI analysis service.";
+        if (resultEl) resultEl.innerText = "Failed to connect to the AI analysis service.";
     }
 }
 
 function loadSampleData() {
-    document.getElementById("article-title").value = "Breaking: Scientists Discover Water on Mars surface";
-    document.getElementById("article-content").value = "Researchers have announced a significant geological finding confirming liquid water traces on Mars through satellite analysis...";
+    const titleEl = document.getElementById("article-title");
+    const contentEl = document.getElementById("article-content");
+
+    if (titleEl) titleEl.value = "Breaking: Scientists Discover Water on Mars surface";
+    if (contentEl) contentEl.value = "Researchers have announced a significant geological finding confirming liquid water traces on Mars through satellite analysis...";
 }
 
 /* ==========================================
