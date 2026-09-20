@@ -484,3 +484,60 @@ class CredibilityReport {
         return { title: "Fake / Misleading", badgeClass: "danger" };
     }
 }
+
+// ==========================================
+// SUPABASE AUTHENTICATION FIX
+// ==========================================
+document.addEventListener("DOMContentLoaded", () => {
+    // 1. Target form or container
+    const authForm = document.querySelector("form") || document.querySelector(".auth-container");
+
+    if (authForm) {
+        authForm.addEventListener("submit", async (e) => {
+            // STOP page reload which causes input text to disappear
+            e.preventDefault();
+
+            // Fetch input values safely
+            const emailInput = document.querySelector('input[type="email"], input[placeholder*="email"]');
+            const passwordInput = document.querySelector('input[type="password"]');
+
+            const email = emailInput ? emailInput.value.trim() : "";
+            const password = passwordInput ? passwordInput.value : "";
+
+            if (!email || !password) {
+                alert("Please enter both email and password.");
+                return;
+            }
+
+            // Verify Supabase client initialized
+            if (typeof supabase === "undefined" || !supabase.auth) {
+                console.error("Supabase client is not loaded on this page.");
+                alert("Authentication service is unavailable. Check console for details.");
+                return;
+            }
+
+            try {
+                // Call Supabase Authentication
+                const { data, error } = await supabase.auth.signInWithPassword({
+                    email: email,
+                    password: password
+                });
+
+                if (error) {
+                    console.error("Supabase Auth Error:", error.message);
+                    alert("Login failed: " + error.message);
+                } else {
+                    console.log("Logged in successfully:", data);
+                    alert("Login successful!");
+                    
+                    // Hide auth modal if present
+                    const authModal = document.getElementById("auth-modal") || document.querySelector(".modal");
+                    if (authModal) authModal.style.display = "none";
+                }
+            } catch (err) {
+                console.error("Unexpected login error:", err);
+                alert("An unexpected error occurred during login.");
+            }
+        });
+    }
+});
