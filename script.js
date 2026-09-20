@@ -3,7 +3,7 @@
    ========================================== */
 
 const SUPABASE_URL = "https://phcnrnprkndjhztrvauh.supabase.co";
-const SUPABASE_ANON_KEY = "sb_publishable_deV_4p8S9sIjtb5tuHy82w_ENfY2y-t"; // Ensure your full publishable key is here
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBoY25ybnBya25kamh6dHJ2YXVoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg2MDQzNjAsImV4cCI6MjEwNDE4MDM2MH0.bP2189AdSbmQdf75XHWXcnZt3t30-h6WLZT14XfAVR8"; // Ensure your full publishable key is here
 
 let supabaseClient = null;
 let currentAuthMode = "login"; // 'login' or 'signup'
