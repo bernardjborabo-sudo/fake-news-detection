@@ -2,15 +2,23 @@
    CONFIG & UTILITIES
    ========================================== */
 
+/* ==========================================
+   CONFIG & UTILITIES
+   ========================================== */
+
 // Insert your Supabase Project URL and Anon Key here:
 const SUPABASE_URL = "https://YOUR_PROJECT_ID.supabase.co";
 const SUPABASE_ANON_KEY = "YOUR_SUPABASE_ANON_KEY";
 
 // Initialize Supabase Client
-const supabaseClient = (typeof supabase !== "undefined")
-    ? supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
-    : null;
+let supabaseClient = null;
 
+function getSupabase() {
+    if (!supabaseClient && typeof supabase !== "undefined") {
+        supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    }
+    return supabaseClient;
+}
 // Levenshtein Distance for edit distance / typosquatting check
 function levenshteinDistance(a, b) {
     const rows = a.length + 1;
