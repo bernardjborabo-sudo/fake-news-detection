@@ -2,6 +2,13 @@
     box-sizing: border-box;
 }
 
+/* The [hidden] attribute must always win over any display rule below
+   it (e.g. .auth-screen sets display:flex, which otherwise overrides
+   [hidden] and keeps the element visible even after JS hides it). */
+[hidden] {
+    display: none !important;
+}
+
 :root {
     --bg: #f4f7fb;
     --card: #ffffff;
