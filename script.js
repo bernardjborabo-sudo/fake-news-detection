@@ -2,7 +2,7 @@
    SUPABASE & CONFIGURATION SETUP
    ========================================== */
 
-const SUPABASE_URL = "https://phcnrnprkndjhztrvauh.supabase.co/rest/v1/";
+const SUPABASE_URL = "https://phcnrnprkndjhztrvauh.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBoY25ybnBya25kamh6dHJ2YXVoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg2MDQzNjAsImV4cCI6MjEwNDE4MDM2MH0.bP2189AdSbmQdf75XHWXcnZt3t30-h6WLZT14XfAVR8"; // Ensure your full publishable key is here
 
 let supabaseClient = null;
