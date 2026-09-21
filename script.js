@@ -972,21 +972,21 @@ class AttributionAnalyzer
 
 
 // ==========================================
-// AI CREDIBILITY ANALYZER (Gemini)
+// AI CREDIBILITY ANALYZER (Groq)
 // ==========================================
 // Unlike every other analyzer here, this one doesn't infer
 // credibility from writing STYLE — it sends the headline and
-// article text to Google's Gemini API and asks the model to judge
-// the claim itself, using its own knowledge and reasoning. This
-// means it can give a real opinion on ANY article, not just ones a
-// human fact-checker has already reviewed.
+// article text to Groq's API and asks a model to judge the claim
+// itself, using its own knowledge and reasoning. This means it can
+// give a real opinion on ANY article, not just ones a human
+// fact-checker has already reviewed.
 //
-// Get a free key at https://aistudio.google.com/apikey (no card,
-// no billing setup needed for the free tier) and paste it below.
+// Get a free key at https://console.groq.com/keys (no card
+// required) and paste it below. Keys start with "gsk_".
 
-const GEMINI_API_KEY = "AQ.Ab8RN6Ly4bJegqhdsJaLrJ8ySB7HQujyrqfrMaiw1qNYz5MCWQ";
+const GROQ_API_KEY = "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";
 
-const GEMINI_MODEL = "gemini-2.5-flash";
+const GROQ_MODEL = "llama-3.3-70b-versatile";
 
 class AICredibilityAnalyzer
     extends Analyzer {
@@ -1007,18 +1007,17 @@ class AICredibilityAnalyzer
 
         if (
             !this.apiKey ||
-            this.apiKey === "PASTE_YOUR_GEMINI_API_KEY_HERE"
+            this.apiKey === "PASTE_YOUR_GROQ_API_KEY_HERE"
         ) {
 
             return this.noDataResult(
-                "AI credibility check is not configured (no Gemini API key set)."
+                "AI credibility check is not configured (no Groq API key set)."
             );
         }
 
 
         const url =
-            `https://generativelanguage.googleapis.com/v1beta/models/` +
-            `${GEMINI_MODEL}:generateContent`;
+            "https://api.groq.com/openai/v1/chat/completions";
 
 
         // Ask for a strict JSON object back, so we never have to
@@ -1033,29 +1032,23 @@ class AICredibilityAnalyzer
             `Source: ${article.sourceName}\n` +
             `Date: ${article.date}\n` +
             `Article text: ${article.body.slice(0, 4000)}\n\n` +
-            `Respond with a suspicion score from 0 (completely ` +
-            `credible) to 100 (almost certainly false or ` +
-            `fabricated), plus a one- to two-sentence reason.`;
+            `Respond with ONLY a JSON object of the exact shape ` +
+            `{"suspicion": <number 0-100>, "reason": <string>}. ` +
+            `0 means completely credible, 100 means almost ` +
+            `certainly false or fabricated. Keep the reason to one ` +
+            `or two sentences.`;
 
         const requestBody = {
 
-            contents: [{
-                parts: [{ text: prompt }]
-            }],
+            model: GROQ_MODEL,
 
-            generationConfig: {
+            messages: [
+                { role: "user", content: prompt }
+            ],
 
-                responseMimeType: "application/json",
+            response_format: { type: "json_object" },
 
-                responseSchema: {
-                    type: "OBJECT",
-                    properties: {
-                        suspicion: { type: "NUMBER" },
-                        reason: { type: "STRING" }
-                    },
-                    required: ["suspicion", "reason"]
-                }
-            }
+            temperature: 0.2
         };
 
 
@@ -1069,7 +1062,7 @@ class AICredibilityAnalyzer
 
                 headers: {
                     "Content-Type": "application/json",
-                    "x-goog-api-key": this.apiKey
+                    "Authorization": `Bearer ${this.apiKey}`
                 },
 
                 body: JSON.stringify(requestBody)
@@ -1078,7 +1071,7 @@ class AICredibilityAnalyzer
             if (!response.ok) {
 
                 console.error(
-                    "Gemini API request failed:",
+                    "Groq API request failed:",
                     response.status
                 );
 
@@ -1092,7 +1085,7 @@ class AICredibilityAnalyzer
         } catch (error) {
 
             console.error(
-                "Gemini API error:",
+                "Groq API error:",
                 error.message
             );
 
@@ -1107,14 +1100,14 @@ class AICredibilityAnalyzer
         try {
 
             const text =
-                data.candidates[0].content.parts[0].text;
+                data.choices[0].message.content;
 
             parsed = JSON.parse(text);
 
         } catch (error) {
 
             console.error(
-                "Gemini response parsing error:",
+                "Groq response parsing error:",
                 error.message,
                 data
             );
@@ -1519,7 +1512,7 @@ const analyzers = [
 
     new AttributionAnalyzer(),
 
-    new AICredibilityAnalyzer(GEMINI_API_KEY)
+    new AICredibilityAnalyzer(GROQ_API_KEY)
 ];
 
 
