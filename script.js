@@ -986,7 +986,7 @@ class AttributionAnalyzer
 
 const GROQ_API_KEY = "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";
 
-const GROQ_MODEL = "llama-3.3-70b-versatile";
+const GROQ_MODEL = "openai/gpt-oss-120b";
 
 class AICredibilityAnalyzer
     extends Analyzer {
