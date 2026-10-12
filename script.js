@@ -1,5 +1,5 @@
 /*
-    Fake News Detection System (Upgraded - 20+ Conditions)
+    Fake News Detection System (Upgraded with 20+ Conditions & Gemini API)
 
     Rule-based implementation using:
     - Article
@@ -76,7 +76,6 @@ const supabaseClient =
         SUPABASE_URL,
         SUPABASE_ANON_KEY
     );
-
 
 // ==========================================
 // ARTICLE CLASS
@@ -223,20 +222,19 @@ class KeywordAnalyzer
 
         const punctuationRuns = text.match(/[!?]{2,}|\.{3,}/g) || [];
         const exclamationCount = (text.match(/!/g) || []).length;
-        const questionCount = (text.match(/\?/g) || []).length;
 
-        // --- UPGRADED CONDITIONS (1 to 8) ---
+        // --- UPGRADED CONDITIONS (1 to 8) ---[cite: 2]
         let suspicion = 0;
         const reasons = [];
 
-        // Condition 1: High keyword/sensational score match
+        // Condition 1: High keyword/sensational score match[cite: 2]
         if (keywordScore > 0) {
             suspicion += Math.min(40, keywordScore);
             const names = hits.sort((a, b) => b.weight - a.weight).slice(0, 3).map(h => h.phrase);
             reasons.push(`[Condition 1] Detected sensational keywords: ${names.join(", ")}.`);
         }
 
-        // Condition 2: Excessive uppercase / shouting ratio (> 15%)
+        // Condition 2: Excessive uppercase / shouting ratio (> 15%)[cite: 2]
         if (shoutRatio > 0.15) {
             suspicion += 25;
             reasons.push("[Condition 2] Excessive use of capitalized words ('shouting') detected.");
@@ -245,39 +243,39 @@ class KeywordAnalyzer
             reasons.push("[Condition 2b] Moderate capital letter density noted.");
         }
 
-        // Condition 3: Excessive punctuation runs (!!! or ???)
+        // Condition 3: Excessive punctuation runs (!!! or ???)[cite: 2]
         if (punctuationRuns.length > 0) {
             suspicion += Math.min(20, punctuationRuns.length * 6);
             reasons.push("[Condition 3] Multiple punctuation runs (e.g., '!!!') found.");
         }
 
-        // Condition 4: Excessive standalone exclamation marks
+        // Condition 4: Excessive standalone exclamation marks[cite: 2]
         if (exclamationCount >= 3) {
             suspicion += 10;
             reasons.push(`[Condition 4] High frequency of exclamation marks (${exclamationCount}).`);
         }
 
-        // Condition 5: Clickbait headline ending in question mark
+        // Condition 5: Clickbait headline ending in question mark[cite: 2]
         const headlineEndsWithQ = article.headline.trim().endsWith("?");
         if (headlineEndsWithQ) {
             suspicion += 8;
             reasons.push("[Condition 5] Betteridge's law / Headline framed as an unanswered question.");
         }
 
-        // Condition 6: Excessive conversational or direct reader address ("you", "your")
+        // Condition 6: Excessive conversational or direct reader address ("you", "your")[cite: 2]
         const directAddressMatches = (text.match(/\b(you|your|yours)\b/gi) || []).length;
         if (directAddressMatches > 6) {
             suspicion += 10;
             reasons.push("[Condition 6] High frequency of direct reader manipulation terms ('you', 'your').");
         }
 
-        // Condition 7: Extreme length deficit (too short to be a valid detailed article)
+        // Condition 7: Extreme length deficit (too short to be a valid detailed article)[cite: 2]
         if (article.body.length < 100 && article.body.length > 0) {
             suspicion += 15;
             reasons.push("[Condition 7] Extremely short article body length, lacking context.");
         }
 
-        // Condition 8: Excessive numbers/percentages used as bait (e.g. "100%", "10 ways")
+        // Condition 8: Excessive numbers/percentages used as bait (e.g. "100%", "10 ways")[cite: 2]
         const clickbaitNumberRegex = /\b(100%|top \d+|\d+ ways|reasons why)\b/i;
         if (clickbaitNumberRegex.test(text)) {
             suspicion += 10;
@@ -347,32 +345,32 @@ class SourceAnalyzer
         let isBlacklisted = false;
         const reasons = [];
 
-        // --- UPGRADED CONDITIONS (9 to 13) ---
+        // --- UPGRADED CONDITIONS (9 to 13) ---[cite: 2]
         
-        // Condition 9: Typosquatting / Brand Impersonation check
+        // Condition 9: Typosquatting / Brand Impersonation check[cite: 2]
         if (impersonationTarget) {
             suspicion = 90;
             isBlacklisted = true;
             reasons.push(`[Condition 9] Typosquatting detected: Source name mimics trusted outlet '${impersonationTarget}'.`);
         } 
-        // Condition 10: Explicit Blacklist check
+        // Condition 10: Explicit Blacklist check[cite: 2]
         else if (source.rating === "blacklisted") {
             suspicion = 85;
             isBlacklisted = true;
             reasons.push(`[Condition 10] Blacklisted source match: '${rawSource}' is marked untrustworthy.`);
         } 
-        // Condition 11: Trusted source whitelist check
+        // Condition 11: Trusted source whitelist check[cite: 2]
         else if (source.rating === "trusted") {
             suspicion = Math.max(0, Math.round(100 - source.weight));
             suspicion = Math.min(suspicion, 20);
             reasons.push(`[Condition 11] Verified trusted source match (${source.weight}/100 trust weight).`);
         } 
-        // Condition 12: Generic / Placeholder source name check (e.g. "Anonymous", "Admin")
+        // Condition 12: Generic / Placeholder source name check[cite: 2]
         else if (/^(anonymous|admin|staff|unknown|news|admin123|test)$/i.test(rawSource)) {
             suspicion = 70;
             reasons.push(`[Condition 12] Anonymous or generic placeholder source name ('${rawSource}').`);
         } 
-        // Condition 13: Completely unverified custom source
+        // Condition 13: Completely unverified custom source[cite: 2]
         else {
             suspicion = 50;
             reasons.push(`[Condition 13] Unverified source: '${rawSource}' is missing from known directories.`);
@@ -444,8 +442,7 @@ class SimilarityAnalyzer
 
         const reasons = [];
 
-        // --- UPGRADED CONDITIONS (14 to 15) ---
-        // Condition 14: Complete disconnect / Clickbait bait-and-switch headline mismatch
+        // --- UPGRADED CONDITIONS (14 to 15) ---[cite: 2]
         if (recall < 0.15) {
             suspicion = Math.max(suspicion, 75);
             reasons.push(`[Condition 14] Severe topic mismatch: Headline keywords are almost completely absent from the article body (${Math.round(recall * 100)}% overlap).`);
@@ -521,9 +518,7 @@ class AttributionAnalyzer
         let suspicion = 0;
         const reasons = [];
 
-        // --- UPGRADED CONDITIONS (16 to 20) ---
-        
-        // Condition 16: Vague or anonymous attribution trap
+        // --- UPGRADED CONDITIONS (16 to 20) ---[cite: 2]
         if (vagueHits.length > 0) {
             const sumVagueWeight = vagueHits.reduce((s, h) => s + h.weight, 0);
             suspicion += Math.min(35, sumVagueWeight);
@@ -531,19 +526,16 @@ class AttributionAnalyzer
             reasons.push(`[Condition 16] Vague sourcing detected: ${names.join(", ")}.`);
         }
 
-        // Condition 17: Extreme absolutist generalization language
         if (absolutistHits.length > 0) {
             suspicion += Math.min(20, absolutistHits.length * 7);
             reasons.push(`[Condition 17] Over-generalized absolute claims (${absolutistHits.slice(0, 2).join(", ")}).`);
         }
 
-        // Condition 18: Lack of verifiable expert names or formal quotes
         if (quoteCount === 0 && !namedAttribution && !hasAccordingTo) {
             suspicion += 15;
             reasons.push("[Condition 18] Zero direct quotations, named attributions, or formal sources found.");
         }
 
-        // Condition 19: Date anomaly check (future dates or extremely stale dates)
         const articleDate = new Date(article.date);
         const currentDate = new Date();
         if (articleDate > currentDate) {
@@ -551,7 +543,6 @@ class AttributionAnalyzer
             reasons.push("[Condition 19] Temporal anomaly: Article date is set in the future.");
         }
 
-        // Condition 20: Positive attribution credit offset
         let attributionCredit = 0;
         if (quoteCount >= 2) attributionCredit += 10;
         if (hasAccordingTo) attributionCredit += 8;
@@ -578,14 +569,12 @@ class AttributionAnalyzer
 }
 
 
-
 // ==========================================
 // AI CREDIBILITY ANALYZER (Google Gemini)
 // ==========================================
 
-
-const GEMINI_API_KEY = "AQ.Ab8RN6I_JfxduGhN1IvKS2YCtyAM4Qrf_NDmWgqfuFvQfnkbPw";
-const GEMINI_MODEL = "gemini-2.5-flash"; // Or gemini-1.5-flash
+const GEMINI_API_KEY = "PASTE_YOUR_GEMINI_API_KEY_HERE";
+const GEMINI_MODEL = "gemini-2.5-flash";
 
 class AICredibilityAnalyzer
     extends Analyzer {
@@ -596,7 +585,7 @@ class AICredibilityAnalyzer
     }
 
     async analyze(article) {
-        if (!this.apiKey || this.apiKey === "AQ.Ab8RN6I_JfxduGhN1IvKS2YCtyAM4Qrf_NDmWgqfuFvQfnkbPw") {
+        if (!this.apiKey || this.apiKey === "PASTE_YOUR_GEMINI_API_KEY_HERE") {
             return this.noDataResult(
                 "AI credibility check is not configured (no Gemini API key set)."
             );
@@ -685,6 +674,7 @@ class AICredibilityAnalyzer
         };
     }
 }
+
 
 // ==========================================
 // CREDIBILITY REPORT
@@ -823,7 +813,7 @@ const analyzers = [
     new KeywordAnalyzer(),
     new SimilarityAnalyzer(),
     new AttributionAnalyzer(),
-    new AICredibilityAnalyzer(GROQ_API_KEY)
+    new AICredibilityAnalyzer(GEMINI_API_KEY)
 ];
 
 const $ = id => document.getElementById(id);
@@ -977,7 +967,6 @@ supabaseClient.auth.onAuthStateChange(async (event, session) => {
         renderHistory();
     } else {
         database = null;
-        $("appShell").hidden = false ? true : true; // Keep auth gate open
         $("appShell").hidden = true;
         $("authScreen").hidden = false;
         $("authForm").reset();
