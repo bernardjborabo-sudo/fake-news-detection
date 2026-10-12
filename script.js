@@ -1,5 +1,5 @@
 /*
-    Fake News Detection System
+    Fake News Detection System (Upgraded - 20+ Conditions)
 
     Rule-based implementation using:
     - Article
@@ -17,13 +17,6 @@
 // ==========================================
 // LEVENSHTEIN DISTANCE (edit distance)
 // ==========================================
-// Classic dynamic-programming DSA algorithm. Used by SourceAnalyzer
-// to catch "impersonation" source names — fake outlets that mimic a
-// trusted brand with a small typo or extra word, e.g. "Reutters",
-// "BBC-News-Now", "The New York Times Today". A plain equality or
-// substring check misses these; edit distance catches "close but
-// not exact" matches.
-
 function levenshteinDistance(a, b) {
 
     const rows = a.length + 1;
@@ -64,13 +57,6 @@ function levenshteinDistance(a, b) {
 // ==========================================
 // SOURCE NAME NORMALIZATION
 // ==========================================
-// Shared by SourceAnalyzer for both the lookup table's keys and the
-// user-typed source name, so "Reuters", "reuters.com", and
-// "www.reuters.com" all normalize to the same key. Previously this
-// was only applied to the typed name, not the table's own keys —
-// meaning any key containing punctuation (e.g. "example-blacklist
-// .com") could silently fail to match itself.
-
 function normalizeSourceName(name) {
 
     return name
@@ -90,6 +76,7 @@ const supabaseClient =
         SUPABASE_URL,
         SUPABASE_ANON_KEY
     );
+
 // ==========================================
 // ARTICLE CLASS
 // ==========================================
@@ -104,17 +91,13 @@ class Article {
     ) {
 
         this.headline = headline.trim();
-
         this.body = body.trim();
-
         this.sourceName = sourceName.trim();
-
         this.date =
             date ||
             new Date().toISOString().slice(0, 10);
     }
 }
-
 
 
 // ==========================================
@@ -130,13 +113,10 @@ class Source {
     ) {
 
         this.name = name;
-
         this.rating = rating;
-
         this.weight = weight;
     }
 }
-
 
 
 // ==========================================
@@ -154,9 +134,8 @@ class Analyzer {
 }
 
 
-
 // ==========================================
-// KEYWORD ANALYZER
+// KEYWORD & TEXT PATTERN ANALYZER (Conditions 1 - 8)
 // ==========================================
 
 class KeywordAnalyzer
@@ -166,22 +145,12 @@ class KeywordAnalyzer
 
         super();
 
-        // Hash Map equivalent: phrase -> severity weight.
-        // Higher weight = stronger clickbait/sensationalism signal.
-        // Splitting into tiers avoids treating "breaking" (common,
-        // legitimate in real news) the same as "truth they don't
-        // want you to know" (almost always bait).
-
         this.keywords = new Map([
-
-            // Tier 1: mild / commonly used even by real outlets
             ["breaking", 3],
             ["urgent", 4],
             ["exclusive", 3],
             ["viral", 4],
             ["scandal", 4],
-
-            // Tier 2: moderate sensationalism
             ["shocking", 6],
             ["unbelievable", 6],
             ["secret", 5],
@@ -194,8 +163,6 @@ class KeywordAnalyzer
             ["you need to know", 5],
             ["gone wrong", 5],
             ["what happened next", 6],
-
-            // Tier 3: strong clickbait / manipulation phrasing
             ["you won't believe", 9],
             ["miracle", 8],
             ["100% proof", 10],
@@ -211,433 +178,225 @@ class KeywordAnalyzer
             ["wake up", 6],
             ["click here", 8],
             ["won't believe what happens", 10]
-
         ]);
     }
 
 
     analyze(article) {
 
-        const text =
-            `${article.headline} ${article.body}`;
-
-        const lower =
-            text.toLowerCase();
-
-
-        // Find suspicious keyword/phrase hits, weighted by severity.
-        // Use word-boundary-aware matching for single words so we
-        // don't match substrings inside unrelated words; multi-word
-        // phrases are matched as plain substrings since word
-        // boundaries on both ends already make false positives rare.
+        const text = `${article.headline} ${article.body}`;
+        const lower = text.toLowerCase();
 
         const hits = [];
 
         for (const [phrase, weight] of this.keywords) {
-
             const hasSpace = phrase.includes(" ");
-
             const found = hasSpace
                 ? lower.includes(phrase)
                 : new RegExp(`\\b${phrase}\\b`, "i").test(lower);
 
             if (found) {
-
                 hits.push({ phrase, weight });
             }
         }
 
-
-        const keywordScore =
-            hits.reduce(
-                (sum, hit) => sum + hit.weight,
-                0
-            );
-
-
-        // Check capitalization — per WORD, not per letter.
-        // A raw letter-based ratio unfairly flags short, normal
-        // text containing a couple of acronyms (e.g. "US", "UN").
-        // Instead, count words that are entirely uppercase, at
-        // least 3 letters long (so "I", "A", "US", "UK" don't
-        // count), and exclude a short allow-list of common
-        // legitimate acronyms.
+        const keywordScore = hits.reduce((sum, hit) => sum + hit.weight, 0);
 
         const commonAcronyms = new Set([
             "usa", "uk", "un", "eu", "who", "nba", "nfl", "ceo",
             "faq", "fbi", "cia", "gdp", "covid", "ai", "us",
-            // News-organization acronyms, so headlines/bodies that
-            // simply mention a real outlet by its short name aren't
-            // mistaken for "shouting".
             "bbc", "cnn", "npr", "abc", "nbc", "cbs", "fox", "afp",
             "upi", "pbs", "nyt", "wsj", "ap", "pna", "gma",
             "nasa", "fda", "cdc", "nato", "dna", "gps"
         ]);
 
-        const words =
-            text.match(/[A-Za-z']+/g) || [];
+        const words = text.match(/[A-Za-z']+/g) || [];
+        const shoutWords = words.filter(word =>
+            word.length >= 3 &&
+            word === word.toUpperCase() &&
+            /[A-Z]/.test(word) &&
+            !commonAcronyms.has(word.toLowerCase())
+        );
 
-        const shoutWords =
-            words.filter(word =>
-                word.length >= 3 &&
-                word === word.toUpperCase() &&
-                /[A-Z]/.test(word) &&
-                !commonAcronyms.has(word.toLowerCase())
-            );
+        const shoutRatio = words.length ? shoutWords.length / words.length : 0;
 
-        const shoutRatio =
-            words.length
-                ? shoutWords.length / words.length
-                : 0;
+        const punctuationRuns = text.match(/[!?]{2,}|\.{3,}/g) || [];
+        const exclamationCount = (text.match(/!/g) || []).length;
+        const questionCount = (text.match(/\?/g) || []).length;
 
-
-        // Check punctuation: both "runs" (!!!, ??, ...) AND overall
-        // exclamation-mark density, since a single "!!!" and ten
-        // separate "!" convey similarly manipulative tone but the
-        // old check only caught the former.
-
-        const punctuationRuns =
-            text.match(
-                /[!?]{2,}|\.{3,}/g
-            ) || [];
-
-        const exclamationCount =
-            (text.match(/!/g) || []).length;
-
-
+        // --- UPGRADED CONDITIONS (1 to 8) ---
         let suspicion = 0;
-
-
-        // Keyword score (weighted, capped)
-
-        suspicion += Math.min(45, keywordScore);
-
-
-        // Capitalization ("shouting") score
-
-        if (shoutRatio > 0.15) {
-
-            suspicion += 25;
-
-        } else if (shoutRatio > 0.07) {
-
-            suspicion += 12;
-        }
-
-
-        // Punctuation score: runs + density, capped combined
-
-        let punctuationScore =
-            Math.min(20, punctuationRuns.length * 6);
-
-        if (exclamationCount >= 5) {
-
-            punctuationScore += 10;
-
-        } else if (exclamationCount >= 2) {
-
-            punctuationScore += 5;
-        }
-
-        suspicion += Math.min(30, punctuationScore);
-
-
-        suspicion =
-            Math.min(
-                100,
-                Math.round(suspicion)
-            );
-
-
         const reasons = [];
 
-
-        if (hits.length) {
-
-            const names = hits
-                .sort((a, b) => b.weight - a.weight)
-                .slice(0, 4)
-                .map(hit => hit.phrase);
-
-            reasons.push(
-                `Found ${hits.length} sensational/clickbait pattern(s): ` +
-                `${names.join(", ")}` +
-                `${hits.length > 4 ? "..." : ""}.`
-            );
+        // Condition 1: High keyword/sensational score match
+        if (keywordScore > 0) {
+            suspicion += Math.min(40, keywordScore);
+            const names = hits.sort((a, b) => b.weight - a.weight).slice(0, 3).map(h => h.phrase);
+            reasons.push(`[Condition 1] Detected sensational keywords: ${names.join(", ")}.`);
         }
 
-
+        // Condition 2: Excessive uppercase / shouting ratio (> 15%)
         if (shoutRatio > 0.15) {
-
-            reasons.push(
-                "Excessive capitalized words detected."
-            );
-
+            suspicion += 25;
+            reasons.push("[Condition 2] Excessive use of capitalized words ('shouting') detected.");
         } else if (shoutRatio > 0.07) {
-
-            reasons.push(
-                "Higher-than-usual number of capitalized words detected."
-            );
+            suspicion += 12;
+            reasons.push("[Condition 2b] Moderate capital letter density noted.");
         }
 
-
-        if (punctuationRuns.length) {
-
-            reasons.push(
-                "Excessive punctuation runs (e.g. \"!!!\") detected."
-            );
+        // Condition 3: Excessive punctuation runs (!!! or ???)
+        if (punctuationRuns.length > 0) {
+            suspicion += Math.min(20, punctuationRuns.length * 6);
+            reasons.push("[Condition 3] Multiple punctuation runs (e.g., '!!!') found.");
         }
 
-        if (exclamationCount >= 2) {
-
-            reasons.push(
-                `${exclamationCount} exclamation marks found in the text.`
-            );
+        // Condition 4: Excessive standalone exclamation marks
+        if (exclamationCount >= 3) {
+            suspicion += 10;
+            reasons.push(`[Condition 4] High frequency of exclamation marks (${exclamationCount}).`);
         }
 
+        // Condition 5: Clickbait headline ending in question mark
+        const headlineEndsWithQ = article.headline.trim().endsWith("?");
+        if (headlineEndsWithQ) {
+            suspicion += 8;
+            reasons.push("[Condition 5] Betteridge's law / Headline framed as an unanswered question.");
+        }
+
+        // Condition 6: Excessive conversational or direct reader address ("you", "your")
+        const directAddressMatches = (text.match(/\b(you|your|yours)\b/gi) || []).length;
+        if (directAddressMatches > 6) {
+            suspicion += 10;
+            reasons.push("[Condition 6] High frequency of direct reader manipulation terms ('you', 'your').");
+        }
+
+        // Condition 7: Extreme length deficit (too short to be a valid detailed article)
+        if (article.body.length < 100 && article.body.length > 0) {
+            suspicion += 15;
+            reasons.push("[Condition 7] Extremely short article body length, lacking context.");
+        }
+
+        // Condition 8: Excessive numbers/percentages used as bait (e.g. "100%", "10 ways")
+        const clickbaitNumberRegex = /\b(100%|top \d+|\d+ ways|reasons why)\b/i;
+        if (clickbaitNumberRegex.test(text)) {
+            suspicion += 10;
+            reasons.push("[Condition 8] Contains listicle-style numerical bait phrasing.");
+        }
+
+        suspicion = Math.min(100, Math.round(suspicion));
 
         if (!reasons.length) {
-
-            reasons.push(
-                "No major clickbait, capitalization, or punctuation pattern was detected."
-            );
+            reasons.push("No major keyword or text pattern infractions were found.");
         }
 
-
         return {
-
-            name:
-                "Keyword & Text Pattern Analyzer",
-
+            name: "Keyword & Text Pattern Analyzer",
             suspicion: suspicion,
-
-            credibility:
-                100 - suspicion,
-
-            reason:
-                reasons.join(" ")
+            credibility: 100 - suspicion,
+            reason: reasons.join(" ")
         };
     }
 }
 
 
-
 // ==========================================
-// SOURCE ANALYZER
+// SOURCE ANALYZER (Conditions 9 - 13)
 // ==========================================
 
 class SourceAnalyzer
     extends Analyzer {
 
     constructor(sourceTable) {
-
         super();
-
-        // Hash Map equivalent. Keys are normalized here too (not
-        // just the incoming article's source name) — otherwise a
-        // table key containing punctuation, like
-        // "example-blacklist.com", would never match its own
-        // normalized form and would silently fall through to
-        // "unverified" instead of "blacklisted".
-
-        this.sourceTable =
-            new Map(
-                Object.entries(sourceTable)
-                    .map(([key, source]) =>
-                        [normalizeSourceName(key), source]
-                    )
-            );
-
-        // Precompute the list of trusted-source keys once, so each
-        // analyze() call doesn't have to re-filter the whole table
-        // just to run the impersonation check below.
-
-        this.trustedKeys =
-            [...this.sourceTable.entries()]
-                .filter(([, source]) => source.rating === "trusted")
-                .map(([key]) => key);
+        this.sourceTable = new Map(
+            Object.entries(sourceTable).map(([key, source]) =>
+                [normalizeSourceName(key), source]
+            )
+        );
+        this.trustedKeys = [...this.sourceTable.entries()]
+            .filter(([, source]) => source.rating === "trusted")
+            .map(([key]) => key);
     }
 
 
     analyze(article) {
-
-        const key = normalizeSourceName(article.sourceName);
-
+        const rawSource = article.sourceName;
+        const key = normalizeSourceName(rawSource);
         const exactMatch = this.sourceTable.get(key);
 
-
-        // If there's no exact match, check whether the name is
-        // SUSPICIOUSLY CLOSE to a known trusted source — a classic
-        // fake-news tactic is registering "Reutters" or "BBC-News-
-        // Now" to borrow a real outlet's credibility. Edit distance
-        // catches this; a plain equality check can't.
-
         let impersonationTarget = null;
-
         if (!exactMatch && key.length >= 4) {
-
             let bestDistance = Infinity;
             let bestKey = null;
-
             for (const trustedKey of this.trustedKeys) {
-
-                const distance =
-                    levenshteinDistance(key, trustedKey);
-
+                const distance = levenshteinDistance(key, trustedKey);
                 if (distance < bestDistance) {
-
                     bestDistance = distance;
                     bestKey = trustedKey;
                 }
             }
-
-            // A small edit distance relative to name length means
-            // "very close but not identical" — exactly what a
-            // typosquatted or copycat name looks like. Require
-            // distance > 0 so an actual exact match (already
-            // handled above) isn't double-flagged.
-
-            if (
-                bestKey &&
-                bestDistance > 0 &&
-                bestDistance <= 2
-            ) {
-
-                impersonationTarget =
-                    this.sourceTable.get(bestKey).name;
+            if (bestKey && bestDistance > 0 && bestDistance <= 2) {
+                impersonationTarget = this.sourceTable.get(bestKey).name;
             }
         }
 
+        const source = exactMatch || new Source(rawSource, "unverified", 50);
 
-        const source =
-            exactMatch
-            ||
-            new Source(
-                article.sourceName,
-                "unverified",
-                50
-            );
-
-
-        let suspicion;
+        let suspicion = 0;
         let isBlacklisted = false;
+        const reasons = [];
 
-
+        // --- UPGRADED CONDITIONS (9 to 13) ---
+        
+        // Condition 9: Typosquatting / Brand Impersonation check
         if (impersonationTarget) {
-
-            // Treat likely impersonation as seriously as an
-            // outright blacklisted source: borrowing a trusted
-            // brand's near-identical name is a strong deception
-            // signal on its own, regardless of article content.
-
-            suspicion = 88;
+            suspicion = 90;
             isBlacklisted = true;
-
-        } else {
-
-            // Use the source's continuous "weight" (0-100 trust
-            // score) rather than only three flat buckets. This lets
-            // two "unverified" sources, or two "trusted" sources,
-            // still be told apart if their known reputational
-            // weight differs — a graduated score is more accurate
-            // than a step function.
-
-            suspicion =
-                Math.round(100 - source.weight);
-
-
-            // Still respect the rating as a hard floor/ceiling so a
-            // blacklisted source can never look better than "very
-            // suspicious", and a trusted source never worse than
-            // "fairly credible", regardless of its numeric weight.
-
-            if (source.rating === "blacklisted") {
-
-                suspicion = Math.max(suspicion, 80);
-                isBlacklisted = true;
-
-            } else if (source.rating === "trusted") {
-
-                suspicion = Math.min(suspicion, 20);
-
-            } else {
-
-                // unverified: keep within a moderate suspicion band
-                suspicion = Math.min(Math.max(suspicion, 35), 65);
-            }
+            reasons.push(`[Condition 9] Typosquatting detected: Source name mimics trusted outlet '${impersonationTarget}'.`);
+        } 
+        // Condition 10: Explicit Blacklist check
+        else if (source.rating === "blacklisted") {
+            suspicion = 85;
+            isBlacklisted = true;
+            reasons.push(`[Condition 10] Blacklisted source match: '${rawSource}' is marked untrustworthy.`);
+        } 
+        // Condition 11: Trusted source whitelist check
+        else if (source.rating === "trusted") {
+            suspicion = Math.max(0, Math.round(100 - source.weight));
+            suspicion = Math.min(suspicion, 20);
+            reasons.push(`[Condition 11] Verified trusted source match (${source.weight}/100 trust weight).`);
+        } 
+        // Condition 12: Generic / Placeholder source name check (e.g. "Anonymous", "Admin")
+        else if (/^(anonymous|admin|staff|unknown|news|admin123|test)$/i.test(rawSource)) {
+            suspicion = 70;
+            reasons.push(`[Condition 12] Anonymous or generic placeholder source name ('${rawSource}').`);
+        } 
+        // Condition 13: Completely unverified custom source
+        else {
+            suspicion = 50;
+            reasons.push(`[Condition 13] Unverified source: '${rawSource}' is missing from known directories.`);
         }
-
-
-        let reason;
-
-
-        if (impersonationTarget) {
-
-            reason =
-                `Source "${article.sourceName}" closely resembles the trusted outlet ` +
-                `"${impersonationTarget}" but does not match it exactly — this is a common ` +
-                `impersonation/typosquatting pattern.`;
-
-        } else if (
-            source.rating === "trusted"
-        ) {
-
-            reason =
-                `Source "${article.sourceName}" is on the trusted-source list (trust weight ${source.weight}/100).`;
-
-        } else if (
-            source.rating === "blacklisted"
-        ) {
-
-            reason =
-                `Source "${article.sourceName}" is on the blacklisted-source list.`;
-
-        } else {
-
-            reason =
-                `Source "${article.sourceName}" is not in the known-source table, so it is treated as unverified.`;
-        }
-
 
         return {
-
-            name:
-                "Source Reputation Analyzer",
-
-            suspicion:
-
-                suspicion,
-
-            credibility:
-                100 - suspicion,
-
-            isBlacklisted:
-                isBlacklisted,
-
-            reason:
-                reason
+            name: "Source Reputation Analyzer",
+            suspicion: suspicion,
+            credibility: 100 - suspicion,
+            isBlacklisted: isBlacklisted,
+            reason: reasons.join(" ")
         };
     }
 }
 
 
-
 // ==========================================
-// SIMILARITY ANALYZER
+// SIMILARITY ANALYZER (Conditions 14 - 15)
 // ==========================================
 
 class SimilarityAnalyzer
     extends Analyzer {
 
     constructor() {
-
         super();
-
-        // Common function words to ignore. Without this, matching
-        // words like "that", "with", or "have" inflate the overlap
-        // score without telling us anything about actual topical
-        // similarity between headline and body.
-
         this.stopwords = new Set([
             "this", "that", "with", "from", "have", "will",
             "your", "about", "which", "their", "there", "would",
@@ -650,170 +409,69 @@ class SimilarityAnalyzer
 
 
     analyze(article) {
+        const tokenize = text => new Set(
+            text.toLowerCase()
+                .replace(/[^a-z0-9\s]/g, " ")
+                .split(/\s+/)
+                .filter(word => word.length > 3 && !this.stopwords.has(word))
+        );
 
-        const tokenize =
-            text =>
+        const headlineWords = tokenize(article.headline);
+        const bodyWords = tokenize(article.body);
 
-                new Set(
-
-                    text
-                        .toLowerCase()
-
-                        .replace(
-                            /[^a-z0-9\s]/g,
-                            " "
-                        )
-
-                        .split(/\s+/)
-
-                        .filter(
-                            word =>
-                                word.length > 3 &&
-                                !this.stopwords.has(word)
-                        )
-                );
-
-
-        const headlineWords =
-            tokenize(
-                article.headline
-            );
-
-
-        const bodyWords =
-            tokenize(
-                article.body
-            );
-
-
-        if (
-            !headlineWords.size ||
-            !bodyWords.size
-        ) {
-
+        if (!headlineWords.size || !bodyWords.size) {
             return {
-
-                name:
-                    "Headline/Body Similarity Analyzer",
-
+                name: "Headline/Body Similarity Analyzer",
                 suspicion: 50,
-
                 credibility: 50,
-
-                reason:
-                    "Not enough text was provided for a meaningful similarity check."
+                reason: "Insufficient text content for topical similarity calculation."
             };
         }
 
-
         let overlap = 0;
+        headlineWords.forEach(word => {
+            if (bodyWords.has(word)) overlap++;
+        });
 
-        headlineWords.forEach(
-            word => {
+        const recall = overlap / headlineWords.size;
+        const union = new Set([...headlineWords, ...bodyWords]).size;
+        const jaccard = overlap / union;
+        const similarity = (recall * 0.7) + (jaccard * 0.3);
 
-                if (bodyWords.has(word)) {
+        let suspicion = Math.round((1 - similarity) * 100);
+        suspicion = Math.max(0, Math.min(100, suspicion));
 
-                    overlap++;
-                }
-            }
-        );
+        const reasons = [];
 
-
-        // "Recall": how much of the headline's claim is actually
-        // discussed in the body (the original metric).
-
-        const recall =
-            overlap / headlineWords.size;
-
-
-        // "Jaccard": overlap relative to the UNION of both word
-        // sets. This adds sensitivity the old metric lacked: a
-        // headline can score high on recall just by using a couple
-        // of generic words that also happen to appear in a long,
-        // unrelated body — Jaccard is harder to game that way
-        // because a large, mostly-unrelated body pulls the union
-        // up and the score down.
-
-        const union =
-            new Set([...headlineWords, ...bodyWords]).size;
-
-        const jaccard =
-            overlap / union;
-
-
-        // Blend both signals. Recall answers "is the headline's
-        // topic covered?"; Jaccard answers "how much of the overall
-        // vocabulary is actually shared?". Weighting recall higher
-        // keeps the metric close to its original intent while
-        // Jaccard corrects for headline words that are too generic
-        // to mean much on their own.
-
-        const similarity =
-            (recall * 0.7) + (jaccard * 0.3);
-
-
-        let suspicion =
-            Math.round(
-                (1 - similarity) * 100
-            );
-
-
-        suspicion =
-            Math.max(
-                0,
-                Math.min(
-                    100,
-                    suspicion
-                )
-            );
-
-
-        const reason =
-            `Approximately ${Math.round(recall * 100)}% of meaningful ` +
-            `headline words also appear in the article body ` +
-            `(topical overlap score: ${Math.round(similarity * 100)}%).`;
-
+        // --- UPGRADED CONDITIONS (14 to 15) ---
+        // Condition 14: Complete disconnect / Clickbait bait-and-switch headline mismatch
+        if (recall < 0.15) {
+            suspicion = Math.max(suspicion, 75);
+            reasons.push(`[Condition 14] Severe topic mismatch: Headline keywords are almost completely absent from the article body (${Math.round(recall * 100)}% overlap).`);
+        } else {
+            reasons.push(`[Condition 15] Topical coherence score normal: ${Math.round(similarity * 100)}% keyword overlap between headline and body.`);
+        }
 
         return {
-
-            name:
-                "Headline/Body Similarity Analyzer",
-
-            suspicion:
-                suspicion,
-
-            credibility:
-                100 - suspicion,
-
-            reason:
-                reason
+            name: "Headline/Body Similarity Analyzer",
+            suspicion: suspicion,
+            credibility: 100 - suspicion,
+            reason: reasons.join(" ")
         };
     }
 }
 
 
-
 // ==========================================
-// ATTRIBUTION & LANGUAGE ANALYZER
+// ATTRIBUTION & LANGUAGE ANALYZER (Conditions 16 - 20)
 // ==========================================
-// Checks for vague-sourcing phrases ("sources say", "many believe")
-// and absolutist/loaded language ("always", "everyone", "no one"),
-// both of which are common in fabricated or unverifiable stories.
-// Gives partial credit back for genuine attribution markers (direct
-// quotes, "according to", named "X said" constructions), since
-// well-sourced reporting should legitimately score lower suspicion.
 
 class AttributionAnalyzer
     extends Analyzer {
 
     constructor() {
-
         super();
-
-        // Hash Map equivalent: phrase -> severity weight
-
         this.vaguePhrases = new Map([
-
             ["sources say", 8],
             ["sources close to", 8],
             ["insiders claim", 9],
@@ -832,7 +490,6 @@ class AttributionAnalyzer
             ["allegedly", 4]
         ]);
 
-
         this.absolutistWords = [
             "always", "never", "everyone", "no one",
             "completely", "totally", "every single",
@@ -842,187 +499,105 @@ class AttributionAnalyzer
 
 
     analyze(article) {
-
-        const text =
-            `${article.headline} ${article.body}`;
-
-        const lower =
-            text.toLowerCase();
-
+        const text = `${article.headline} ${article.body}`;
+        const lower = text.toLowerCase();
 
         const vagueHits = [];
-
         for (const [phrase, weight] of this.vaguePhrases) {
-
             if (lower.includes(phrase)) {
-
                 vagueHits.push({ phrase, weight });
             }
         }
 
+        const absolutistHits = this.absolutistWords.filter(
+            word => new RegExp(`\\b${word}\\b`, "i").test(lower)
+        );
 
-        const absolutistHits =
-            this.absolutistWords.filter(
-                word =>
-                    new RegExp(`\\b${word}\\b`, "i").test(lower)
-            );
-
-
-        // Positive signals: real reporting usually contains direct
-        // quotes and clear attribution ("according to...", "X said
-        // ..."). Their presence should lower suspicion, not just
-        // the absence of red flags raise it.
-
-        const quoteCount =
-            (text.match(/["“”]/g) || []).length;
-
-        const hasAccordingTo =
-            /according to/i.test(text);
-
-        const namedAttribution =
-            /\b[A-Z][a-z]+ (?:said|stated|told|explained|confirmed|announced)\b/
-                .test(text);
-
+        const quoteCount = (text.match(/["“”]/g) || []).length;
+        const hasAccordingTo = /according to/i.test(text);
+        const namedAttribution = /\b[A-Z][a-z]+ (?:said|stated|told|explained|confirmed|announced)\b/.test(text);
 
         let suspicion = 0;
+        const reasons = [];
 
+        // --- UPGRADED CONDITIONS (16 to 20) ---
+        
+        // Condition 16: Vague or anonymous attribution trap
+        if (vagueHits.length > 0) {
+            const sumVagueWeight = vagueHits.reduce((s, h) => s + h.weight, 0);
+            suspicion += Math.min(35, sumVagueWeight);
+            const names = vagueHits.slice(0, 2).map(h => h.phrase);
+            reasons.push(`[Condition 16] Vague sourcing detected: ${names.join(", ")}.`);
+        }
 
-        suspicion += Math.min(
-            35,
-            vagueHits.reduce((sum, hit) => sum + hit.weight, 0)
-        );
+        // Condition 17: Extreme absolutist generalization language
+        if (absolutistHits.length > 0) {
+            suspicion += Math.min(20, absolutistHits.length * 7);
+            reasons.push(`[Condition 17] Over-generalized absolute claims (${absolutistHits.slice(0, 2).join(", ")}).`);
+        }
 
+        // Condition 18: Lack of verifiable expert names or formal quotes
+        if (quoteCount === 0 && !namedAttribution && !hasAccordingTo) {
+            suspicion += 15;
+            reasons.push("[Condition 18] Zero direct quotations, named attributions, or formal sources found.");
+        }
 
-        suspicion += Math.min(
-            20,
-            absolutistHits.length * 7
-        );
+        // Condition 19: Date anomaly check (future dates or extremely stale dates)
+        const articleDate = new Date(article.date);
+        const currentDate = new Date();
+        if (articleDate > currentDate) {
+            suspicion += 25;
+            reasons.push("[Condition 19] Temporal anomaly: Article date is set in the future.");
+        }
 
-
+        // Condition 20: Positive attribution credit offset
         let attributionCredit = 0;
-
         if (quoteCount >= 2) attributionCredit += 10;
         if (hasAccordingTo) attributionCredit += 8;
         if (namedAttribution) attributionCredit += 10;
 
-        suspicion = Math.max(0, suspicion - attributionCredit);
-
-        suspicion =
-            Math.min(100, Math.round(suspicion));
-
-
-        const reasons = [];
-
-
-        if (vagueHits.length) {
-
-            const names = vagueHits
-                .sort((a, b) => b.weight - a.weight)
-                .slice(0, 3)
-                .map(hit => hit.phrase);
-
-            reasons.push(
-                `Found ${vagueHits.length} vague-sourcing phrase(s): ` +
-                `${names.join(", ")}` +
-                `${vagueHits.length > 3 ? "..." : ""}.`
-            );
-        }
-
-
-        if (absolutistHits.length) {
-
-            reasons.push(
-                `Absolutist language detected (${absolutistHits.slice(0, 3).join(", ")}).`
-            );
-        }
-
-
         if (attributionCredit > 0) {
-
-            reasons.push(
-                "Direct quotes or clear named attribution were found, which supports credibility."
-            );
+            reasons.push("[Condition 20] Credibility boosted by explicit named attributions and direct quotes.");
         }
 
+        suspicion = Math.max(0, suspicion - attributionCredit);
+        suspicion = Math.min(100, Math.round(suspicion));
 
         if (!reasons.length) {
-
-            reasons.push(
-                "No notable vague-sourcing or absolutist language patterns were detected."
-            );
+            reasons.push("No major attribution or linguistic anomalies detected.");
         }
 
-
         return {
-
-            name:
-                "Attribution & Language Analyzer",
-
+            name: "Attribution & Language Analyzer",
             suspicion: suspicion,
-
-            credibility:
-                100 - suspicion,
-
-            reason:
-                reasons.join(" ")
+            credibility: 100 - suspicion,
+            reason: reasons.join(" ")
         };
     }
 }
 
 
-
 // ==========================================
 // AI CREDIBILITY ANALYZER (Groq)
 // ==========================================
-// Unlike every other analyzer here, this one doesn't infer
-// credibility from writing STYLE — it sends the headline and
-// article text to Groq's API and asks a model to judge the claim
-// itself, using its own knowledge and reasoning. This means it can
-// give a real opinion on ANY article, not just ones a human
-// fact-checker has already reviewed.
-//
-// Get a free key at https://console.groq.com/keys (no card
-// required) and paste it below. Keys start with "gsk_".
 
 const GROQ_API_KEY = "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";
-
 const GROQ_MODEL = "openai/gpt-oss-120b";
 
 class AICredibilityAnalyzer
     extends Analyzer {
 
     constructor(apiKey) {
-
         super();
-
         this.apiKey = apiKey;
     }
 
-
     async analyze(article) {
-
-        // No key configured: behave as "no data available" rather
-        // than throwing, so the rest of the app still works if
-        // someone forgets to set the key.
-
-        if (
-            !this.apiKey ||
-            this.apiKey === "PASTE_YOUR_GROQ_API_KEY_HERE"
-        ) {
-
-            return this.noDataResult(
-                "AI credibility check is not configured (no Groq API key set)."
-            );
+        if (!this.apiKey || this.apiKey === "PASTE_YOUR_GROQ_API_KEY_HERE") {
+            return this.noDataResult("AI credibility check is not configured (no Groq API key set).");
         }
 
-
-        const url =
-            "https://api.groq.com/openai/v1/chat/completions";
-
-
-        // Ask for a strict JSON object back, so we never have to
-        // parse free-form prose out of the model's reply.
-
+        const url = "https://api.groq.com/openai/v1/chat/completions";
         const prompt =
             `You are a fact-checking assistant. Judge how credible ` +
             `the following news article is, using your own ` +
@@ -1039,131 +614,59 @@ class AICredibilityAnalyzer
             `or two sentences.`;
 
         const requestBody = {
-
             model: GROQ_MODEL,
-
-            messages: [
-                { role: "user", content: prompt }
-            ],
-
+            messages: [{ role: "user", content: prompt }],
             response_format: { type: "json_object" },
-
             temperature: 0.2
         };
 
-
         let data;
-
         try {
-
             const response = await fetch(url, {
-
                 method: "POST",
-
                 headers: {
                     "Content-Type": "application/json",
                     "Authorization": `Bearer ${this.apiKey}`
                 },
-
                 body: JSON.stringify(requestBody)
             });
 
             if (!response.ok) {
-
-                console.error(
-                    "Groq API request failed:",
-                    response.status
-                );
-
-                return this.noDataResult(
-                    "AI credibility check failed (network or API error). Falling back to other signals."
-                );
+                return this.noDataResult("AI credibility check failed (network/API error).");
             }
-
             data = await response.json();
-
         } catch (error) {
-
-            console.error(
-                "Groq API error:",
-                error.message
-            );
-
-            return this.noDataResult(
-                "AI credibility check failed (network or API error). Falling back to other signals."
-            );
+            return this.noDataResult("AI credibility check failed (network/API error).");
         }
-
 
         let parsed;
-
         try {
-
-            const text =
-                data.choices[0].message.content;
-
-            parsed = JSON.parse(text);
-
+            parsed = JSON.parse(data.choices[0].message.content);
         } catch (error) {
-
-            console.error(
-                "Groq response parsing error:",
-                error.message,
-                data
-            );
-
-            return this.noDataResult(
-                "AI credibility check returned an unreadable response. Falling back to other signals."
-            );
+            return this.noDataResult("AI credibility check returned an unreadable response.");
         }
 
-
-        // Clamp in case the model returns something outside 0-100.
-
-        const suspicion =
-            Math.min(
-                100,
-                Math.max(0, Math.round(parsed.suspicion))
-            );
-
+        const suspicion = Math.min(100, Math.max(0, Math.round(parsed.suspicion)));
 
         return {
-
-            name:
-                "AI Credibility Analyzer",
-
+            name: "AI Credibility Analyzer",
             suspicion: suspicion,
-
-            credibility:
-                100 - suspicion,
-
+            credibility: 100 - suspicion,
             hasMatch: true,
-
-            reason:
-                parsed.reason ||
-                "The AI model did not provide a specific reason."
+            reason: parsed.reason || "The AI model did not provide a specific reason."
         };
     }
 
-
     noDataResult(reason) {
-
         return {
-
-            name:
-                "AI Credibility Analyzer",
-
+            name: "AI Credibility Analyzer",
             suspicion: 50,
-
             credibility: 50,
-
             hasMatch: false,
-
             reason: reason
         };
     }
 }
-
 
 
 // ==========================================
@@ -1173,1042 +676,294 @@ class AICredibilityAnalyzer
 class CredibilityReport {
 
     constructor(results) {
-
         this.results = results;
 
-
-        // Base weights, used when the AI Credibility Analyzer
-        // successfully returned a judgment. When it DIDN'T (no key
-        // set, network/API error), its weight is redistributed
-        // proportionally to the other four analyzers instead of
-        // counting its neutral 50/50 placeholder toward the average
-        // — "no data" is not evidence of anything and shouldn't
-        // quietly drag every score toward the middle.
-
         const baseWeights = {
-
-            "Source Reputation Analyzer":
-                0.25,
-
-            "Keyword & Text Pattern Analyzer":
-                0.25,
-
-            "Headline/Body Similarity Analyzer":
-                0.10,
-
-            "Attribution & Language Analyzer":
-                0.15,
-
-            "AI Credibility Analyzer":
-                0.25
+            "Source Reputation Analyzer": 0.25,
+            "Keyword & Text Pattern Analyzer": 0.25,
+            "Headline/Body Similarity Analyzer": 0.10,
+            "Attribution & Language Analyzer": 0.15,
+            "AI Credibility Analyzer": 0.25
         };
 
-
-        const aiResult =
-            results.find(result => result.name === "AI Credibility Analyzer");
-
-        const aiMatched =
-            aiResult && aiResult.hasMatch;
-
+        const aiResult = results.find(result => result.name === "AI Credibility Analyzer");
+        const aiMatched = aiResult && aiResult.hasMatch;
 
         let weights = baseWeights;
-
         if (!aiMatched) {
-
-            const remainingTotal =
-                1 - baseWeights["AI Credibility Analyzer"];
-
+            const remainingTotal = 1 - baseWeights["AI Credibility Analyzer"];
             weights = {};
-
             for (const name in baseWeights) {
-
-                weights[name] =
-                    name === "AI Credibility Analyzer"
-                        ? 0
-                        : baseWeights[name] / remainingTotal;
+                weights[name] = name === "AI Credibility Analyzer" ? 0 : baseWeights[name] / remainingTotal;
             }
         }
 
-
-        this.credibility =
-            Math.round(
-
-                results.reduce(
-
-                    (sum, result) =>
-
-                        sum +
-                        result.credibility *
-                        (weights[result.name] || 0),
-
-                    0
-                )
-            );
-
-
-        // Hard override: a blacklisted or impersonating source is
-        // disqualifying on its own. Without this, a fake outlet
-        // that writes cleanly (no clickbait words, decent
-        // attribution) could still average out to "Uncertain" or
-        // better, even though its source alone is a red flag no
-        // amount of good prose should outweigh.
-
-        const hasDisqualifyingSource =
-            results.some(result => result.isBlacklisted);
-
-        if (hasDisqualifyingSource) {
-
-            this.credibility =
-                Math.min(this.credibility, 25);
-        }
-
-
-        this.suspicion =
-            100 -
-            this.credibility;
-
-
-        // Verdict
-
-        if (
-            this.credibility >= 70
-        ) {
-
-            this.verdict =
-                "Likely Reliable";
-
-        } else if (
-            this.credibility >= 45
-        ) {
-
-            this.verdict =
-                "Uncertain";
-
-        } else {
-
-            this.verdict =
-                "Likely Fake";
-        }
-    }
-}
-
-
-
-// ==========================================
-// NEWS DATABASE
-// ==========================================
-
-class NewsDatabase {
-
-    constructor(userId) {
-
-        // Each signed-in user only ever sees rows
-        // where history.user_id matches their own id
-        // (enforced server-side by Row Level Security)
-
-        this.userId = userId;
-
-        this.history = [];
-    }
-
-
-    async load() {
-
-        const { data, error } =
-            await supabaseClient
-                .from("history")
-                .select("*")
-                .eq("user_id", this.userId)
-                .order("created_at", { ascending: false });
-
-
-        if (error) {
-
-            console.error(
-                "Failed to load history:",
-                error.message
-            );
-
-            this.history = [];
-
-            return;
-        }
-
-
-        this.history = data;
-    }
-
-
-    async save(
-        article,
-        report
-    ) {
-
-        const { data, error } =
-            await supabaseClient
-                .from("history")
-                .insert({
-
-                    user_id:
-                        this.userId,
-
-                    article:
-                        article,
-
-                    credibility:
-                        report.credibility,
-
-                    suspicion:
-                        report.suspicion,
-
-                    verdict:
-                        report.verdict
-                })
-                .select()
-                .single();
-
-
-        if (error) {
-
-            console.error(
-                "Failed to save history:",
-                error.message
-            );
-
-            return;
-        }
-
-
-        this.history.unshift(data);
-    }
-
-
-    async clear() {
-
-        const { error } =
-            await supabaseClient
-                .from("history")
-                .delete()
-                .eq("user_id", this.userId);
-
-
-        if (error) {
-
-            console.error(
-                "Failed to clear history:",
-                error.message
-            );
-
-            return;
-        }
-
-
-        this.history = [];
-    }
-
-
-    getMostSuspicious() {
-
-        return [
-
-            ...this.history
-
-        ].sort(
-
-            (a, b) =>
-                b.suspicion -
-                a.suspicion
-        );
-    }
-}
-
-
-
-// ==========================================
-// KNOWN SOURCES
-// ==========================================
-
-const knownSources = {
-
-    "reuters":
-        new Source("Reuters", "trusted", 95),
-
-    "bbc":
-        new Source("BBC", "trusted", 92),
-
-    "associated press":
-        new Source("Associated Press", "trusted", 93),
-
-    "ap":
-        new Source("Associated Press", "trusted", 93),
-
-    "the new york times":
-        new Source("The New York Times", "trusted", 85),
-
-    "nytimes":
-        new Source("The New York Times", "trusted", 85),
-
-    "npr":
-        new Source("NPR", "trusted", 88),
-
-    "the guardian":
-        new Source("The Guardian", "trusted", 82),
-
-    "philippine daily inquirer":
-        new Source("Philippine Daily Inquirer", "trusted", 85),
-
-    "inquirer":
-        new Source("Philippine Daily Inquirer", "trusted", 85),
-
-    "rappler":
-        new Source("Rappler", "trusted", 82),
-
-    "gma news":
-        new Source("GMA News", "trusted", 80),
-
-    "abscbn news":
-        new Source("ABS-CBN News", "trusted", 80),
-
-    "philstar":
-        new Source("The Philippine Star", "trusted", 78),
-
-    "pna":
-        new Source("Philippine News Agency", "trusted", 80),
-
-    // Known low-quality / satire / clickbait-farm style outlets.
-    // Weight is low but not zero — "blacklisted" plus the floor in
-    // SourceAnalyzer already guarantees a high suspicion score.
-
-    "example-blacklist.com":
-        new Source("example-blacklist.com", "blacklisted", 10),
-
-    "worldnewsdailyreport":
-        new Source("World News Daily Report", "blacklisted", 5),
-
-    "the onion":
-        new Source("The Onion", "blacklisted", 15) // satire, not "fake" per se, but not a news source
-};
-
-
-
-// ==========================================
-// CREATE OBJECTS
-// ==========================================
-
-// Created once a user is signed in (see AUTH section near the bottom)
-
-let database = null;
-
-
-const analyzers = [
-
-    new SourceAnalyzer(
-        knownSources
-    ),
-
-    new KeywordAnalyzer(),
-
-    new SimilarityAnalyzer(),
-
-    new AttributionAnalyzer(),
-
-    new AICredibilityAnalyzer(GROQ_API_KEY)
-];
-
-
-
-// ==========================================
-// HELPER FUNCTIONS
-// ==========================================
-
-const $ =
-    id =>
-        document.getElementById(id);
-
-
-
-function escapeHtml(value) {
-
-    return String(value).replace(
-
-        /[&<>"']/g,
-
-        character => ({
-
-            "&": "&amp;",
-
-            "<": "&lt;",
-
-            ">": "&gt;",
-
-            '"': "&quot;",
-
-            "'": "&#039;"
-
-        }[character])
-    );
-}
-
-
-
-function verdictClass(
-    verdict
-) {
-
-    if (
-        verdict === "Likely Reliable"
-    ) {
-
-        return "good";
-    }
-
-
-    if (
-        verdict === "Uncertain"
-    ) {
-
-        return "warn";
-    }
-
-
-    return "bad";
-}
-
-
-
-// ==========================================
-// DISPLAY REPORT
-// ==========================================
-
-function renderReport(
-    report
-) {
-
-    const className =
-        verdictClass(
-            report.verdict
-        );
-
-
-    // Verdict pill
-
-    $("verdictPill").className =
-        `pill ${className}`;
-
-
-    $("verdictPill").textContent =
-        report.verdict;
-
-
-    // Score
-
-    $("scoreRing").style
-        .setProperty(
-            "--score",
-            report.credibility
-        );
-
-
-    $("scoreValue").textContent =
-        `${report.credibility}%`;
-
-
-    // Verdict title
-
-    $("verdictTitle").textContent =
-        report.verdict;
-
-
-    // Verdict message
-
-    if (
-        report.verdict ===
-        "Likely Reliable"
-    ) {
-
-        $("verdictText").textContent =
-            "The article shows relatively few suspicious patterns. Manual fact-checking is still recommended.";
-
-    } else if (
-        report.verdict ===
-        "Uncertain"
-    ) {
-
-        $("verdictText").textContent =
-            "The article contains mixed signals. Treat it cautiously and verify important claims.";
-
-    } else {
-
-        $("verdictText").textContent =
-            "The article shows several suspicious patterns. Do not treat this result as proof; verify the claims independently.";
-    }
-
-
-    // Analyzer results
-
-    $("analyzerResults").innerHTML =
-
-        report.results.map(
-
-            result => `
-
-                <div class="analyzer">
-
-                    <div class="analyzer-top">
-
-                        <span class="analyzer-name">
-                            ${escapeHtml(
-                                result.name
-                            )}
-                        </span>
-
-                        <span class="analyzer-score">
-                            ${result.credibility}% credibility
-                        </span>
-
-                    </div>
-
-
-                    <div class="progress">
-
-                        <div
-                            style="width:${result.credibility}%"
-                        ></div>
-
-                    </div>
-
-
-                    <small>
-                        ${escapeHtml(
-                            result.reason
-                        )}
-                    </small>
-
-                </div>
-
-            `
-        ).join("");
-}
-
-
-
-// ==========================================
-// DISPLAY HISTORY
-// ==========================================
-
-function renderHistory() {
-
-    const history =
-        database
-            ? database.getMostSuspicious()
-            : [];
-
-
-    $("historyCount").textContent =
-
-        `${history.length} check${
-            history.length === 1
-                ? ""
-                : "s"
-        }`;
-
-
-    if (!history.length) {
-
-        $("historyList").innerHTML =
-            `<div class="empty-state">
-                No previous checks.
-            </div>`;
-
-        return;
-    }
-
-
-    $("historyList").innerHTML =
-
-        history.map(
-
-            item => `
-
-                <div class="history-item">
-
-                    <div>
-
-                        <p class="history-title">
-                            ${escapeHtml(
-                                item.article.headline
-                            )}
-                        </p>
-
-                        <p class="history-meta">
-                            ${escapeHtml(
-                                item.article.sourceName
-                            )}
-                            •
-                            ${escapeHtml(
-                                item.article.date
-                            )}
-                            •
-                            ${escapeHtml(
-                                item.verdict
-                            )}
-                        </p>
-
-                    </div>
-
-
-                    <div class="suspicion">
-
-                        ${item.suspicion}%
-
-                        <small>
-                            suspicion
-                        </small>
-
-                    </div>
-
-                </div>
-
-            `
-        ).join("");
-}
-
-
-
-// ==========================================
-// ANALYZE FORM
-// ==========================================
-
-$("newsForm")
-    .addEventListener(
-        "submit",
-        async event => {
-
-            event.preventDefault();
-
-
-            if (!database) {
-
-                return;
-            }
-
-
-            const article =
-                new Article(
-
-                    $("headline").value,
-
-                    $("body").value,
-
-                    $("source").value,
-
-                    $("date").value
-                );
-
-
-            // Disable the button and show a loading label while
-            // the AI Credibility Analyzer makes its network request —
-            // this is the one analyzer that isn't instant, so the
-            // UI should say so rather than appear to hang.
-
-            const submitBtn =
-                $("newsForm").querySelector("button[type=submit]");
-
-            const originalLabel = submitBtn.textContent;
-
-            submitBtn.disabled = true;
-            submitBtn.textContent = "Checking...";
-
-
-            // Run all analyzers. Most return a plain object
-            // synchronously; the AI Credibility Analyzer returns a
-            // Promise (it calls an external API). Promise.all
-            // handles both transparently.
-
-            const results =
-                await Promise.all(
-                    analyzers.map(
-                        analyzer =>
-                            analyzer.analyze(
-                                article
-                            )
-                    )
-                );
-
-
-            submitBtn.disabled = false;
-            submitBtn.textContent = originalLabel;
-
-
-            // Create report
-
-            const report =
-                new CredibilityReport(
-                    results
-                );
-
-
-            // Display
-
-            renderReport(
-                report
-            );
-
-
-            // Save
-
-            await database.save(
-                article,
-                report
-            );
-
-
-            // Refresh history
-
-            renderHistory();
-        }
-    );
-
-
-
-// ==========================================
-// RESET
-// ==========================================
-
-$("resetBtn")
-    .addEventListener(
-        "click",
-        () => {
-
-            $("newsForm").reset();
-
-
-            $("scoreRing")
-                .style
-                .setProperty(
-                    "--score",
-                    0
-                );
-
-
-            $("scoreValue")
-                .textContent = "--";
-
-
-            $("verdictPill").className =
-                "pill neutral";
-
-
-            $("verdictPill").textContent =
-                "Not analyzed";
-
-
-            $("verdictTitle")
-                .textContent =
-                "Ready to analyze";
-
-
-            $("verdictText")
-                .textContent =
-                "Enter a headline, source, and article text, then click Analyze Credibility.";
-
-
-            $("analyzerResults")
-                .innerHTML =
-                `<div class="empty-state">
-                    No analyzer results yet.
-                </div>`;
-        }
-    );
-
-
-
-// ==========================================
-// CLEAR HISTORY
-// ==========================================
-
-$("clearAllBtn")
-    .addEventListener(
-        "click",
-        async () => {
-
-            if (
-                !database ||
-                !database.history.length
-            ) {
-
-                return;
-            }
-
-
-            if (
-                confirm(
-                    "Clear all saved analysis history?"
-                )
-            ) {
-
-                await database.clear();
-
-                renderHistory();
-            }
-        }
-    );
-
-
-
-// ==========================================
-// SAMPLE ARTICLE
-// ==========================================
-
-$("sampleBtn")
-    .addEventListener(
-        "click",
-        () => {
-
-            $("headline").value =
-                "BREAKING!!! SHOCKING SECRET THEY DON'T WANT YOU TO KNOW";
-
-
-            $("source").value =
-                "Unknown Daily";
-
-
-            $("date").value =
-                new Date()
-                    .toISOString()
-                    .slice(
-                        0,
-                        10
-                    );
-
-
-            $("body").value =
-                "A report claims that officials announced a major change today. The article asks readers to share the story immediately, but provides few verifiable details or supporting sources. Readers should check the original announcement and compare the claim with reports from established news organizations.";
-        }
-    );
-
-
-
-// ==========================================
-// AUTH: MODE SWITCHING (Log In / Sign Up)
-// ==========================================
-
-let authMode = "login";
-
-
-function setAuthMode(mode) {
-
-    authMode = mode;
-
-
-    document
-        .querySelectorAll(".auth-tab")
-        .forEach(tab =>
-            tab.classList.toggle(
-                "active",
-                tab.dataset.mode === mode
+        this.credibility = Math.round(
+            results.reduce(
+                (sum, result) => sum + result.credibility * (weights[result.name] || 0),
+                0
             )
         );
 
+        const hasDisqualifyingSource = results.some(result => result.isBlacklisted);
+        if (hasDisqualifyingSource) {
+            this.credibility = Math.min(this.credibility, 25);
+        }
 
-    $("authSubmitBtn").textContent =
-        mode === "login"
-            ? "Log In"
-            : "Create Account";
+        this.suspicion = 100 - this.credibility;
+
+        if (this.credibility >= 70) {
+            this.verdict = "Likely Reliable";
+        } else if (this.credibility >= 45) {
+            this.verdict = "Uncertain";
+        } else {
+            this.verdict = "Likely Fake";
+        }
+    }
+}
 
 
+// ==========================================
+// NEWS DATABASE & UI BINDINGS
+// ==========================================
+
+class NewsDatabase {
+    constructor(userId) {
+        this.userId = userId;
+        this.history = [];
+    }
+
+    async load() {
+        const { data, error } = await supabaseClient
+            .from("history")
+            .select("*")
+            .eq("user_id", this.userId)
+            .order("created_at", { ascending: false });
+
+        if (error) {
+            this.history = [];
+            return;
+        }
+        this.history = data;
+    }
+
+    async save(article, report) {
+        const { data, error } = await supabaseClient
+            .from("history")
+            .insert({
+                user_id: this.userId,
+                article: article,
+                credibility: report.credibility,
+                suspicion: report.suspicion,
+                verdict: report.verdict
+            })
+            .select()
+            .single();
+
+        if (error) return;
+        this.history.unshift(data);
+    }
+
+    async clear() {
+        const { error } = await supabaseClient
+            .from("history")
+            .delete()
+            .eq("user_id", this.userId);
+
+        if (error) return;
+        this.history = [];
+    }
+
+    getMostSuspicious() {
+        return [...this.history].sort((a, b) => b.suspicion - a.suspicion);
+    }
+}
+
+const knownSources = {
+    "reuters": new Source("Reuters", "trusted", 95),
+    "bbc": new Source("BBC", "trusted", 92),
+    "associated press": new Source("Associated Press", "trusted", 93),
+    "ap": new Source("Associated Press", "trusted", 93),
+    "the new york times": new Source("The New York Times", "trusted", 85),
+    "nytimes": new Source("The New York Times", "trusted", 85),
+    "npr": new Source("NPR", "trusted", 88),
+    "the guardian": new Source("The Guardian", "trusted", 82),
+    "philippine daily inquirer": new Source("Philippine Daily Inquirer", "trusted", 85),
+    "inquirer": new Source("Philippine Daily Inquirer", "trusted", 85),
+    "rappler": new Source("Rappler", "trusted", 82),
+    "gma news": new Source("GMA News", "trusted", 80),
+    "abscbn news": new Source("ABS-CBN News", "trusted", 80),
+    "philstar": new Source("The Philippine Star", "trusted", 78),
+    "pna": new Source("Philippine News Agency", "trusted", 80),
+    "example-blacklist.com": new Source("example-blacklist.com", "blacklisted", 10),
+    "worldnewsdailyreport": new Source("World News Daily Report", "blacklisted", 5),
+    "the onion": new Source("The Onion", "blacklisted", 15)
+};
+
+let database = null;
+const analyzers = [
+    new SourceAnalyzer(knownSources),
+    new KeywordAnalyzer(),
+    new SimilarityAnalyzer(),
+    new AttributionAnalyzer(),
+    new AICredibilityAnalyzer(GROQ_API_KEY)
+];
+
+const $ = id => document.getElementById(id);
+
+function escapeHtml(value) {
+    return String(value).replace(/[&<>"']/g, character => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;"
+    }[character]));
+}
+
+function verdictClass(verdict) {
+    if (verdict === "Likely Reliable") return "good";
+    if (verdict === "Uncertain") return "warn";
+    return "bad";
+}
+
+function renderReport(report) {
+    const className = verdictClass(report.verdict);
+    $("verdictPill").className = `pill ${className}`;
+    $("verdictPill").textContent = report.verdict;
+    $("scoreRing").style.setProperty("--score", report.credibility);
+    $("scoreValue").textContent = `${report.credibility}%`;
+    $("verdictTitle").textContent = report.verdict;
+
+    $("analyzerResults").innerHTML = report.results.map(result => `
+        <div class="analyzer">
+            <div class="analyzer-top">
+                <span class="analyzer-name">${escapeHtml(result.name)}</span>
+                <span class="analyzer-score">${result.credibility}% credibility</span>
+            </div>
+            <div class="progress">
+                <div style="width:${result.credibility}%"></div>
+            </div>
+            <small>${escapeHtml(result.reason)}</small>
+        </div>
+    `).join("");
+}
+
+function renderHistory() {
+    const history = database ? database.getMostSuspicious() : [];
+    $("historyCount").textContent = `${history.length} check${history.length === 1 ? "" : "s"}`;
+    if (!history.length) {
+        $("historyList").innerHTML = `<div class="empty-state">No previous checks.</div>`;
+        return;
+    }
+    $("historyList").innerHTML = history.map(item => `
+        <div class="history-item">
+            <div>
+                <p class="history-title">${escapeHtml(item.article.headline)}</p>
+                <p class="history-meta">${escapeHtml(item.article.sourceName)} • ${escapeHtml(item.article.date)} • ${escapeHtml(item.verdict)}</p>
+            </div>
+            <div class="suspicion">${item.suspicion}%<small>suspicion</small></div>
+        </div>
+    `).join("");
+}
+
+$("newsForm").addEventListener("submit", async event => {
+    event.preventDefault();
+    if (!database) return;
+
+    const article = new Article($("headline").value, $("body").value, $("source").value, $("date").value);
+    const submitBtn = $("newsForm").querySelector("button[type=submit]");
+    const originalLabel = submitBtn.textContent;
+    submitBtn.disabled = true;
+    submitBtn.textContent = "Checking...";
+
+    const results = await Promise.all(analyzers.map(analyzer => analyzer.analyze(article)));
+
+    submitBtn.disabled = false;
+    submitBtn.textContent = originalLabel;
+
+    const report = new CredibilityReport(results);
+    renderReport(report);
+    await database.save(article, report);
+    renderHistory();
+});
+
+$("resetBtn").addEventListener("click", () => {
+    $("newsForm").reset();
+    $("scoreRing").style.setProperty("--score", 0);
+    $("scoreValue").textContent = "--";
+    $("verdictPill").className = "pill neutral";
+    $("verdictPill").textContent = "Not analyzed";
+    $("verdictTitle").textContent = "Ready to analyze";
+    $("analyzerResults").innerHTML = `<div class="empty-state">No analyzer results yet.</div>`;
+});
+
+$("clearAllBtn").addEventListener("click", async () => {
+    if (!database || !database.history.length) return;
+    if (confirm("Clear all saved analysis history?")) {
+        await database.clear();
+        renderHistory();
+    }
+});
+
+let authMode = "login";
+function setAuthMode(mode) {
+    authMode = mode;
+    document.querySelectorAll(".auth-tab").forEach(tab =>
+        tab.classList.toggle("active", tab.dataset.mode === mode)
+    );
+    $("authSubmitBtn").textContent = mode === "login" ? "Log In" : "Create Account";
     $("authError").hidden = true;
     $("authNotice").hidden = true;
 }
 
+document.querySelectorAll(".auth-tab").forEach(tab => {
+    tab.addEventListener("click", () => setAuthMode(tab.dataset.mode));
+});
 
-document
-    .querySelectorAll(".auth-tab")
-    .forEach(tab => {
+$("authForm").addEventListener("submit", async event => {
+    event.preventDefault();
+    $("authError").hidden = true;
+    $("authNotice").hidden = true;
 
-        tab.addEventListener(
-            "click",
-            () =>
-                setAuthMode(tab.dataset.mode)
-        );
-    });
+    const email = $("authEmail").value.trim();
+    const password = $("authPassword").value;
 
-
-
-// ==========================================
-// AUTH: FRIENDLY ERROR MESSAGES
-// ==========================================
-
-function authErrorMessage(error) {
-
-    const raw =
-        error?.message || "";
-
-
-    if (raw.includes("Invalid login credentials")) {
-
-        return "Incorrect email or password.";
-    }
-
-    if (raw.includes("User already registered")) {
-
-        return "An account with that email already exists. Try logging in instead.";
-    }
-
-    if (raw.includes("Password should be at least")) {
-
-        return "Password must be at least 6 characters.";
-    }
-
-    if (raw.includes("Unable to validate email address")) {
-
-        return "That email address doesn't look valid.";
-    }
-
-
-    return raw || "Something went wrong. Please try again.";
-}
-
-
-
-// ==========================================
-// AUTH: FORM SUBMIT (LOGIN OR SIGN UP)
-// ==========================================
-
-$("authForm")
-    .addEventListener(
-        "submit",
-        async event => {
-
-            event.preventDefault();
-
-            $("authError").hidden = true;
-            $("authNotice").hidden = true;
-
-
-            const email =
-                $("authEmail").value.trim();
-
-            const password =
-                $("authPassword").value;
-
-
-            if (authMode === "login") {
-
-                const { error } =
-                    await supabaseClient.auth
-                        .signInWithPassword({
-                            email,
-                            password
-                        });
-
-
-                if (error) {
-
-                    $("authError").hidden = false;
-
-                    $("authError").textContent =
-                        authErrorMessage(error);
-                }
-
-                // On success, onAuthStateChange (below)
-                // takes care of showing the app.
-
-            } else {
-
-                const { data, error } =
-                    await supabaseClient.auth
-                        .signUp({
-                            email,
-                            password
-                        });
-
-
-                if (error) {
-
-                    $("authError").hidden = false;
-
-                    $("authError").textContent =
-                        authErrorMessage(error);
-
-                    return;
-                }
-
-
-                if (!data.session) {
-
-                    // Email confirmation is required by
-                    // this Supabase project's auth settings
-
-                    $("authNotice").hidden = false;
-
-                    $("authNotice").textContent =
-                        "Account created! Check your email to confirm it, then log in.";
-
-                    setAuthMode("login");
-                }
-
-                // If data.session exists, email confirmation
-                // is off and onAuthStateChange logs them in
-                // automatically.
-            }
+    if (authMode === "login") {
+        const { error } = await supabaseClient.auth.signInWithPassword({ email, password });
+        if (error) {
+            $("authError").hidden = false;
+            $("authError").textContent = error.message;
         }
-    );
-
-
-
-// ==========================================
-// AUTH: SIGN OUT
-// ==========================================
-
-$("signOutBtn")
-    .addEventListener(
-        "click",
-        () => {
-
-            supabaseClient.auth.signOut();
+    } else {
+        const { data, error } = await supabaseClient.auth.signUp({ email, password });
+        if (error) {
+            $("authError").hidden = false;
+            $("authError").textContent = error.message;
+            return;
         }
-    );
-
-
-
-// ==========================================
-// AUTH: STATE CHANGE (GATES THE WHOLE APP)
-// ==========================================
-
-supabaseClient.auth.onAuthStateChange(
-    async (event, session) => {
-
-        if (session?.user) {
-
-            // Signed in: show the app, load their history
-
-            $("authScreen").hidden = true;
-            $("appShell").hidden = false;
-
-            $("userEmail").textContent =
-                session.user.email;
-
-
-            database =
-                new NewsDatabase(session.user.id);
-
-            await database.load();
-
-            renderHistory();
-
-        } else {
-
-            // Signed out: show the auth gate, hide the app
-
-            database = null;
-
-            $("appShell").hidden = true;
-            $("authScreen").hidden = false;
-
-            $("authForm").reset();
-
+        if (!data.session) {
+            $("authNotice").hidden = false;
+            $("authNotice").textContent = "Account created! Check your email to confirm it, then log in.";
             setAuthMode("login");
         }
     }
-);
+});
+
+$("signOutBtn").addEventListener("click", () => {
+    supabaseClient.auth.signOut();
+});
+
+supabaseClient.auth.onAuthStateChange(async (event, session) => {
+    if (session?.user) {
+        $("authScreen").hidden = true;
+        $("appShell").hidden = false;
+        $("userEmail").textContent = session.user.email;
+        database = new NewsDatabase(session.user.id);
+        await database.load();
+        renderHistory();
+    } else {
+        database = null;
+        $("appShell").hidden = false ? true : true; // Keep auth gate open
+        $("appShell").hidden = true;
+        $("authScreen").hidden = false;
+        $("authForm").reset();
+        setAuthMode("login");
+    }
+});
