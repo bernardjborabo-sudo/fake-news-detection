@@ -13,6 +13,7 @@
     - NewsDatabase
 */
 
+new AICredibilityAnalyzer(AQ.Ab8RN6I_JfxduGhN1IvKS2YCtyAM4Qrf_NDmWgqfuFvQfnkbPw) 
 
 // ==========================================
 // LEVENSHTEIN DISTANCE (edit distance)
@@ -577,12 +578,14 @@ class AttributionAnalyzer
 }
 
 
+
 // ==========================================
-// AI CREDIBILITY ANALYZER (Groq)
+// AI CREDIBILITY ANALYZER (Google Gemini)
 // ==========================================
 
-const GROQ_API_KEY = "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";
-const GROQ_MODEL = "openai/gpt-oss-120b";
+
+const GEMINI_API_KEY = "AQ.Ab8RN6I_JfxduGhN1IvKS2YCtyAM4Qrf_NDmWgqfuFvQfnkbPw";
+const GEMINI_MODEL = "gemini-2.5-flash"; // Or gemini-1.5-flash
 
 class AICredibilityAnalyzer
     extends Analyzer {
@@ -593,11 +596,14 @@ class AICredibilityAnalyzer
     }
 
     async analyze(article) {
-        if (!this.apiKey || this.apiKey === "PASTE_YOUR_GROQ_API_KEY_HERE") {
-            return this.noDataResult("AI credibility check is not configured (no Groq API key set).");
+        if (!this.apiKey || this.apiKey === "AQ.Ab8RN6I_JfxduGhN1IvKS2YCtyAM4Qrf_NDmWgqfuFvQfnkbPw") {
+            return this.noDataResult(
+                "AI credibility check is not configured (no Gemini API key set)."
+            );
         }
 
-        const url = "https://api.groq.com/openai/v1/chat/completions";
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${this.apiKey}`;
+
         const prompt =
             `You are a fact-checking assistant. Judge how credible ` +
             `the following news article is, using your own ` +
@@ -614,10 +620,15 @@ class AICredibilityAnalyzer
             `or two sentences.`;
 
         const requestBody = {
-            model: GROQ_MODEL,
-            messages: [{ role: "user", content: prompt }],
-            response_format: { type: "json_object" },
-            temperature: 0.2
+            contents: [
+                {
+                    parts: [{ text: prompt }]
+                }
+            ],
+            generationConfig: {
+                responseMimeType: "application/json",
+                temperature: 0.2
+            }
         };
 
         let data;
@@ -625,28 +636,35 @@ class AICredibilityAnalyzer
             const response = await fetch(url, {
                 method: "POST",
                 headers: {
-                    "Content-Type": "application/json",
-                    "Authorization": `Bearer ${this.apiKey}`
+                    "Content-Type": "application/json"
                 },
                 body: JSON.stringify(requestBody)
             });
 
             if (!response.ok) {
-                return this.noDataResult("AI credibility check failed (network/API error).");
+                console.error("Gemini API request failed:", response.status);
+                return this.noDataResult("AI credibility check failed (network or API error).");
             }
+
             data = await response.json();
         } catch (error) {
-            return this.noDataResult("AI credibility check failed (network/API error).");
+            console.error("Gemini API error:", error.message);
+            return this.noDataResult("AI credibility check failed (network or API error).");
         }
 
         let parsed;
         try {
-            parsed = JSON.parse(data.choices[0].message.content);
+            const text = data.candidates[0].content.parts[0].text;
+            parsed = JSON.parse(text);
         } catch (error) {
+            console.error("Gemini response parsing error:", error.message, data);
             return this.noDataResult("AI credibility check returned an unreadable response.");
         }
 
-        const suspicion = Math.min(100, Math.max(0, Math.round(parsed.suspicion)));
+        const suspicion = Math.min(
+            100,
+            Math.max(0, Math.round(parsed.suspicion))
+        );
 
         return {
             name: "AI Credibility Analyzer",
@@ -667,7 +685,6 @@ class AICredibilityAnalyzer
         };
     }
 }
-
 
 // ==========================================
 // CREDIBILITY REPORT
