@@ -77,7 +77,6 @@ const supabaseClient =
         SUPABASE_ANON_KEY
     );
 
-new AICredibilityAnalyzer(AQ.Ab8RN6I_JfxduGhN1IvKS2YCtyAM4Qrf_NDmWgqfuFvQfnkbPw)
 
 // ==========================================
 // ARTICLE CLASS
